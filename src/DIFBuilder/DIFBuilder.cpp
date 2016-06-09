@@ -25,7 +25,7 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 //-----------------------------------------------------------------------------
 
-#include "DIFBuilder.hpp"
+#include <DIFBuilder/DIFBuilder.hpp>
 
 DIF_NAMESPACE
 
