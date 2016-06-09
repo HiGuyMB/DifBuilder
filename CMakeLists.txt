@@ -43,11 +43,12 @@ endmacro()
 
 SET (DIFBUILDER_SRC
 	src/DIFBuilder/DIFBuilder.cpp
-	src/DIFBuilder/DIFBuilder.hpp
+	include/DIFBuilder/DIFBuilder.hpp
 )
 
 # Create the library
 add_library(DifBuilder STATIC ${DIFBUILDER_SRC})
+include_directories(include)
 include_directories(3rdparty/Dif)
 include_directories(3rdparty/Dif/3rdparty/glm)
 include_directories(3rdparty/Dif/include)
