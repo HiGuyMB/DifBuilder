@@ -74,6 +74,7 @@ void DIFBuilder::build(DIF &dif) {
 		interior.materialName.push_back(material);
 	}
 
+	//TODO: this seems wrong (way too easy)
 	for (U32 i = 0; i < 256; i ++) {
 		Interior::CoordBin bin;
 		bin.binStart = i;
@@ -96,6 +97,7 @@ void DIFBuilder::build(DIF &dif) {
 		interior.point.push_back(triangle.points[2].vertex * scale);
 	}
 
+	//TODO: Multiple zones?
 	Interior::Zone zone;
 	zone.portalStart = 0;
 	zone.portalCount = 0;
@@ -105,6 +107,7 @@ void DIFBuilder::build(DIF &dif) {
 	zone.staticMeshCount = 0;
 	zone.flags = 0;
 
+	//TODO: Multiple convex hulls to speed up stuff?
 	BoxF box = getBoundingBox();
 	Interior::ConvexHull hull;
 	hull.hullStart = interior.hullIndex.size();
@@ -124,6 +127,7 @@ void DIFBuilder::build(DIF &dif) {
 
 	interior.convexHull.push_back(hull);
 
+	//TODO: Figure out how their BSP system works
 	Interior::BSPSolidLeaf leaf;
 	leaf.surfaceIndex = interior.solidLeafSurface.size();
 	leaf.surfaceCount = mTriangles.size();
@@ -149,7 +153,8 @@ void DIFBuilder::build(DIF &dif) {
 
 		//BSP Node
 		Interior::BSPNode bsp;
-		//todo: probably wrong
+		//TODO: This is really, really inefficient. It puts everything into one
+		// giant BSP tree.
 		bsp.planeIndex = ((interior.plane.size() + mTriangles.size() - triIndex) - triIndex);
 		bsp.frontIndex = 0x8000;
 		bsp.backIndex = (triIndex == mTriangles.size() - 1 ? 0xC000 : interior.plane.size() + 1);
@@ -178,6 +183,7 @@ void DIFBuilder::build(DIF &dif) {
 		surface.mapSizeY = 0;
 		surface.brushId = 0;
 
+		//TODO: No idea what these are
 		interior.hullPlaneIndex.push_back(interior.plane.size());
 		interior.hullSurfaceIndex.push_back(interior.surface.size());
 		interior.hullIndex.push_back(assoc0);
@@ -189,6 +195,7 @@ void DIFBuilder::build(DIF &dif) {
 		interior.index.push_back(assoc1);
 		interior.index.push_back(assoc2);
 
+		//TODO: What are these?
 		interior.polyListPlaneIndex.push_back(interior.plane.size());
 		interior.polyListPointIndex.push_back(assoc0);
 		interior.polyListPointIndex.push_back(assoc1);
@@ -196,6 +203,7 @@ void DIFBuilder::build(DIF &dif) {
 
 		interior.texGenEq.push_back(texGen);
 
+		//TODO: Figure these out too
 		interior.zoneSurface.push_back(interior.surface.size());
 		interior.solidLeafSurface.push_back(interior.surface.size());
 
@@ -210,22 +218,15 @@ void DIFBuilder::build(DIF &dif) {
 
 	interior.zone.push_back(zone);
 
+	//TODO: Need to solve these too.
+
+	//These all need at least one item to not crash
 	interior.polyListPlaneIndex.push_back(0);
 	interior.polyListPointIndex.push_back(0);
 	interior.polyListStringCharacter.push_back(0);
 	interior.hullEmitStringIndex.push_back(0);
 	interior.convexHullEmitStringCharacter.push_back(0);
 
-	//	std::vector<TexGenEq> texGenEq;
-	//	std::vector<U8> convexHullEmitStringCharacter;
-	//	std::vector<U32> hullIndex;
-	//	std::vector<U16> hullPlaneIndex;
-	//	std::vector<U32> hullEmitStringIndex;
-	//	std::vector<U32> hullSurfaceIndex;
-	//	std::vector<U16> polyListPlaneIndex;
-	//	std::vector<U32> polyListPointIndex;
-	//	std::vector<U8> polyListStringCharacter;
-	
 	dif.interior.push_back(interior);
 }
 
@@ -256,13 +257,14 @@ glm::vec3 DIFBuilder::getAverageNormal(const Triangle &triangle) {
 	const glm::vec3 &point1 = triangle.points[1].vertex;
 	const glm::vec3 &point2 = triangle.points[2].vertex;
 
+	//n = (v2 - v1) x (v2 - v0)
 	glm::vec3 crossNorm = glm::normalize(glm::cross(point2 - point1, point2 - point0));
 
 	return crossNorm;
 }
 
 F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &center) {
-	//Use the center of the plane
+	//Use the center of the plane, probably correct
 	glm::vec3 averagePoint(0);
 	const glm::vec3 &point0 = triangle.points[0].vertex;
 	const glm::vec3 &point1 = triangle.points[1].vertex;
@@ -291,15 +293,21 @@ glm::vec3 solveSystem(F32 a, F32 b, F32 c, F32 d, F32 e, F32 f, F32 g, F32 h, F3
 
 	 For (x, y, z)
 
-	 Warning: it's not pretty
+	 Solved this out on paper, should work as long as a is nonzero and a few other
+	 things work out to nonzero.
 	 */
-	F32 zTop = (l - (i * d / a)) - (((j - (i * b / a)) * (h - (e * d / a))) / (f - (e * b / a)));
-	F32 zBot = (((j - (i * b / a)) * ((e * c / a) - g)) / (f - (e * b / a))) + (k - (i * c / a));
+
+	//Slight optimization, so we don't have to do a bunch of divisions
+	F32 _a = 1.0f / a;
+	F32 _f_sub_eb_a = 1.0f / (f - (e * b * _a));
+
+	F32 zTop = (l - (i * d * _a)) - (((j - (i * b * _a)) * (h - (e * d * _a))) * _f_sub_eb_a);
+	F32 zBot = (((j - (i * b * _a)) * ((e * c * _a) - g)) * _f_sub_eb_a) + (k - (i * c * _a));
 	F32 z = zTop / zBot;
 
-	F32 y = ((h - (e * d / a)) + (((e * c / a) - g) * z)) / (f - (e * b / a));
+	F32 y = ((h - (e * d * _a)) + (((e * c * _a) - g) * z)) * _f_sub_eb_a;
 
-	F32 x = (d - (b * y) - (c * z)) / a;
+	F32 x = (d - (b * y) - (c * z)) * _a;
 
 	return glm::vec3(x, y, z);
 }
@@ -307,25 +315,6 @@ glm::vec3 solveSystem(F32 a, F32 b, F32 c, F32 d, F32 e, F32 f, F32 g, F32 h, F3
 Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 &point1, const glm::vec3 &point2,
 								  glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2) {
 	Interior::TexGenEq texGen;
-
-	//Not taking any chances with division by 0
-	F32 min = uv0.x;
-	if (uv0.y < min) min = uv0.y;
-	if (uv1.x < min) min = uv1.x;
-	if (uv1.y < min) min = uv1.y;
-	if (uv2.x < min) min = uv2.x;
-	if (uv2.y < min) min = uv2.y;
-	if (min <= 0.5f) {
-		min = fabsf(min) + 1.0f;
-		uv0.x += min;
-		uv0.y += min;
-		uv1.x += min;
-		uv1.y += min;
-		uv2.x += min;
-		uv2.y += min;
-		texGen.planeX.d = -min;
-		texGen.planeY.d = -min;
-	}
 
 	glm::vec3 xsolve = solveSystem(point0.x, point0.y, point0.z, uv0.x, point1.x, point1.y, point1.z, uv1.x, point2.x, point2.y, point2.z, uv2.x);
 	glm::vec3 ysolve = solveSystem(point0.x, point0.y, point0.z, uv0.y, point1.x, point1.y, point1.z, uv1.y, point2.x, point2.y, point2.z, uv2.y);
