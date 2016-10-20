@@ -57,10 +57,15 @@ void DIFBuilder::build(DIF &dif) {
 	typedef U32 PointAssocIndex;
 	typedef U32 DifPointIndex;
 
+	for (auto &triangle : mTriangles) {
+		triangle.points[0].vertex *= mScale;
+		triangle.points[1].vertex *= mScale;
+		triangle.points[2].vertex *= mScale;
+	}
+
 	std::map<PointAssocIndex, DifPointIndex> pointAssoc;
 
 	Interior interior;
-	F32 scale = 0.1;
 
 	interior.detailLevel = 0;
 	interior.minPixels = 250;
@@ -92,9 +97,9 @@ void DIFBuilder::build(DIF &dif) {
 
 	//Add vertices to the interior
 	for (const Triangle &triangle : mTriangles) {
-		interior.point.push_back(triangle.points[0].vertex * scale);
-		interior.point.push_back(triangle.points[1].vertex * scale);
-		interior.point.push_back(triangle.points[2].vertex * scale);
+		interior.point.push_back(triangle.points[0].vertex);
+		interior.point.push_back(triangle.points[1].vertex);
+		interior.point.push_back(triangle.points[2].vertex);
 	}
 
 	//TODO: Multiple zones?
@@ -233,9 +238,9 @@ void DIFBuilder::build(DIF &dif) {
 BoxF DIFBuilder::getBoundingBox() {
 	BoxF box(1e8, 1e8, 1e8, -1e8, -1e8, -1e8);
 	for (const auto &triangle : mTriangles) {
-		box.unionPoint(triangle.points[0].vertex * mScale);
-		box.unionPoint(triangle.points[1].vertex * mScale);
-		box.unionPoint(triangle.points[2].vertex * mScale);
+		box.unionPoint(triangle.points[0].vertex);
+		box.unionPoint(triangle.points[1].vertex);
+		box.unionPoint(triangle.points[2].vertex);
 	}
 	return box;
 }
@@ -280,7 +285,12 @@ F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &cent
 	//http://mathworld.wolfram.com/Point-PlaneDistance.html
 	//D = n • (x_0 - x_i)
 	// Where x_0 = (0, 0, 0)
-	return glm::dot(-averagePoint * mScale, normal);
+	return glm::dot(-averagePoint, normal);
+}
+
+template<typename T>
+bool closeEnough(const T &p1, const T &p2) {
+	return glm::distance(p1, p2) < 0.01f;
 }
 
 glm::vec3 solveSystem(F32 a, F32 b, F32 c, F32 d, F32 e, F32 f, F32 g, F32 h, F32 i, F32 j, F32 k, F32 l) {
@@ -292,22 +302,114 @@ glm::vec3 solveSystem(F32 a, F32 b, F32 c, F32 d, F32 e, F32 f, F32 g, F32 h, F3
 	 { ix + jy + kz = l
 
 	 For (x, y, z)
-
-	 Solved this out on paper, should work as long as a is nonzero and a few other
-	 things work out to nonzero.
 	 */
 
-	//Slight optimization, so we don't have to do a bunch of divisions
-	F32 _a = 1.0f / a;
-	F32 _f_sub_eb_a = 1.0f / (f - (e * b * _a));
+	F32 x, y, z;
 
-	F32 zTop = (l - (i * d * _a)) - (((j - (i * b * _a)) * (h - (e * d * _a))) * _f_sub_eb_a);
-	F32 zBot = (((j - (i * b * _a)) * ((e * c * _a) - g)) * _f_sub_eb_a) + (k - (i * c * _a));
-	F32 z = zTop / zBot;
+	bool no_aei = (closeEnough(b*e, a*f) || closeEnough(a, 0.f));
+	bool no_eia = (closeEnough(f*i, e*j) || closeEnough(e, 0.f));
+	bool no_iae = (closeEnough(j*a, i*b) || closeEnough(i, 0.f));
 
-	F32 y = ((h - (e * d * _a)) + (((e * c * _a) - g) * z)) * _f_sub_eb_a;
+	//According to wolframalpha
+	//z = (-a f l+a h j+b e l-b h i-d e j+d f i)/(-a f k+a g j+b e k-b g i-c e j+c f i)
+	//y = (a g z-a h-c e z+d e)/(b e-a f)
+	//x = (-b y-c z+d)/a
+	//If b*e == a*f or a == 0 then we need to swap around the equations
+	//If all three have that same issue then we need to solve for another coord first
 
-	F32 x = (d - (b * y) - (c * z)) * _a;
+	if (no_aei && no_eia && no_iae) {
+		//Urg we can't solve x y as the first two
+		//x = (-(d f k)/(c f-b g)+(b h k)/(c f-b g)+(c j z)/b-(d j)/b+l)/(-(a f k)/(c f-b g)-(a j)/b+(b e k)/(c f-b g)+i)
+		//z = (-a f x+b e x-b h+d f)/(c f-b g)
+		//y = (-a x-c z+d)/b
+
+		bool no_bjf = (closeEnough(c*f, b*g) || closeEnough(b, 0.f));
+		bool no_jfb = (closeEnough(g*j, f*k) || closeEnough(f, 0.f));
+		bool no_fbj = (closeEnough(k*b, j*c) || closeEnough(j, 0.f));
+
+		if (no_bjf && no_jfb && no_fbj) {
+			//We can't solve y z as the first two, last chance here
+			//y = (a h (g-k)+c h (i-e)+d e k-d g i)/(-a f k+a g j+b e k-b g i-c e j+c f i)
+			//x = (b k y+c h-c j y-d k)/(c i-a k)
+			//z = (h-j y-i x)/k
+
+			bool no_kcg = (closeEnough(c*i, a*k) || closeEnough(k, 0.f));
+			bool no_cgk = (closeEnough(g*a, e*c) || closeEnough(c, 0.f));
+			bool no_gkc = (closeEnough(k*e, i*g) || closeEnough(g, 0.f));
+
+			if (no_kcg && no_cgk && no_gkc) {
+				
+				std::cerr << "Couldn't solve plane (" << a << ", " << b << ", " << c << "), (" << e << ", " << f << ", " << g << "), (" << i << ", " << j << ", " << k << ") uv (" << d << ", " << h << ", " << l << ")" << std::endl;
+				return glm::vec3(0, 0, 0);
+			}
+
+			if (no_kcg) {
+				if (no_cgk) {
+					y = (i*d*(c-g)+k*d*(e-a)+l*a*g-l*c*e)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
+					x = (j*g*y+k*d-k*f*y-l*g)/(k*e-i*g);
+					z = (d-f*y-e*x)/g;
+				} else {
+					y = (e*l*(k-c)+g*l*(a-i)+h*i*c-h*k*a)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
+					x = (f*c*y+g*l-g*b*y-h*c)/(g*a-e*c);
+					z = (l-b*y-a*x)/c;
+				}
+			} else {
+				y = (a*h*(g-k)+c*h*(i-e)+d*e*k-d*g*i)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
+				x = (b*k*y+c*h-c*j*y-d*k)/(c*i-a*k);
+				z = (h-j*y-i*x)/k;
+			}
+
+			//Make sure it worked
+			assert(closeEnough(a*x + b*y + c*z, d));
+			assert(closeEnough(e*x + f*y + g*z, h));
+			assert(closeEnough(i*x + j*y + k*z, l));
+		} else {
+			//Spiderweb party
+			if (no_bjf) {
+				if (no_fbj) {
+					x = (-j*c*h+j*d*g+k*b*h-k*d*f-l*b*g+l*c*f)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
+					z = (-i*b*x+j*a*x-j*d+l*b)/(k*b-j*c);
+					y = (-i*x-k*z+l)/j;
+				} else {
+					x = (-f*k*d+f*l*c+g*j*d-g*l*b-h*j*c+h*k*b)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
+					z = (-e*j*x+f*i*x-f*l+h*j)/(g*j-f*k);
+					y = (-e*x-g*z+h)/f;
+				}
+			} else {
+				x = (-b*g*l+b*h*k+c*f*l-c*h*j-d*f*k+d*g*j)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
+				z = (-a*f*x+b*e*x-b*h+d*f)/(c*f-b*g);
+				y = (-a*x-c*z+d)/b;
+			}
+
+			//Make sure it worked
+			assert(closeEnough(a*x + b*y + c*z, d));
+			assert(closeEnough(e*x + f*y + g*z, h));
+			assert(closeEnough(i*x + j*y + k*z, l));
+		}
+	} else {
+		//Don't even bother trying to understand the math in this. I just kept plugging stuff
+		// into wolframalpha until the asserts at the end stopped failing.
+		if (no_aei) {
+			if (no_eia) {
+				z = (-i*b*h+i*d*f+j*a*h-j*d*e-l*a*f+l*b*e)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
+				y = (i*c*z-i*d-k*a*z+l*a)/(j*a-i*b);
+				x = (-j*y-k*z+l)/i;
+			} else {
+				z = (-e*j*d+e*l*b+f*i*d-f*l*a-h*i*b+h*j*a)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
+				y = (e*k*z-e*l-g*i*z+h*i)/(f*i-e*j);
+				x = (-f*y-g*z+h)/e;
+			}
+		} else {
+			z = (-a*f*l+a*h*j+b*e*l-b*h*i-d*e*j+d*f*i)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
+			y = (a*g*z-a*h-c*e*z+d*e)/(b*e-a*f);
+			x = (-b*y-c*z+d)/a;
+		}
+	}
+
+	//Make sure it worked
+	assert(closeEnough(a*x + b*y + c*z, d));
+	assert(closeEnough(e*x + f*y + g*z, h));
+	assert(closeEnough(i*x + j*y + k*z, l));
 
 	return glm::vec3(x, y, z);
 }
@@ -329,9 +431,9 @@ Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 
 }
 
 Interior::TexGenEq DIFBuilder::getTexGen(const Triangle &triangle) {
-	return getTexGenFromPoints(triangle.points[0].vertex * mScale,
-							   triangle.points[1].vertex * mScale,
-							   triangle.points[2].vertex * mScale,
+	return getTexGenFromPoints(triangle.points[0].vertex,
+							   triangle.points[1].vertex,
+							   triangle.points[2].vertex,
 							   triangle.points[0].uv,
 							   triangle.points[1].uv,
 							   triangle.points[2].uv);
