@@ -1,0 +1,3 @@
+[submodule "3rdparty/Dif"]
+	path = 3rdparty/Dif
+	url = https://github.com/HiGuyMB/Dif
