@@ -288,129 +288,151 @@ F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &cent
 	return glm::dot(-averagePoint, normal);
 }
 
+//Because floating point math sucks
 template<typename T>
 bool closeEnough(const T &p1, const T &p2) {
-	return glm::distance(p1, p2) < 0.01f;
+	return glm::distance(p1, p2) < 0.0001f;
 }
 
-glm::vec3 solveSystem(F32 a, F32 b, F32 c, F32 d, F32 e, F32 f, F32 g, F32 h, F32 i, F32 j, F32 k, F32 l) {
+//The 3 elementary matrix row operations that you can apply without changing the result
+void swapRows(glm::mat3x4 &mat, int rowA, int rowB) {
+	std::swap(mat[rowA], mat[rowB]);
+}
+void scaleRow(glm::mat3x4 &mat, int row, float scale) {
+	mat[row] *= scale;
+}
+void addRow(glm::mat3x4 &mat, int destRow, int srcRow, float factor) {
+	mat[destRow] += mat[srcRow] * factor;
+}
+
+glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
+	//Clean up stuff that is almost zero
+	if (closeEnough(pointMatrix[0][0], 0.f)) pointMatrix[0][0] = 0.f;
+	if (closeEnough(pointMatrix[1][0], 0.f)) pointMatrix[1][0] = 0.f;
+	if (closeEnough(pointMatrix[2][0], 0.f)) pointMatrix[2][0] = 0.f;
+	if (closeEnough(pointMatrix[0][1], 0.f)) pointMatrix[0][1] = 0.f;
+	if (closeEnough(pointMatrix[1][1], 0.f)) pointMatrix[1][1] = 0.f;
+	if (closeEnough(pointMatrix[2][1], 0.f)) pointMatrix[2][1] = 0.f;
+	if (closeEnough(pointMatrix[0][2], 0.f)) pointMatrix[0][2] = 0.f;
+	if (closeEnough(pointMatrix[1][2], 0.f)) pointMatrix[1][2] = 0.f;
+	if (closeEnough(pointMatrix[2][2], 0.f)) pointMatrix[2][2] = 0.f;
+	if (closeEnough(pointMatrix[0][3], 0.f)) pointMatrix[0][3] = 0.f;
+	if (closeEnough(pointMatrix[1][3], 0.f)) pointMatrix[1][3] = 0.f;
+	if (closeEnough(pointMatrix[2][3], 0.f)) pointMatrix[2][3] = 0.f;
+
+	//For checking at the end
+	glm::mat3x4 test = pointMatrix;
+
 	/*
-	 Solve the system
+	 We have three simultaneous equations:
+	 ax + by + cz = uv0
+	 dx + ey + fz = uv1
+	 gx + hy + iz = uv2
 
-	 { ax + by + cz = d
-	 { ex + fy + gz = h
-	 { ix + jy + kz = l
-
-	 For (x, y, z)
+	 We can arrange them in a matrix like this:
+	 [ a b c ]   ( x )   ( uv0 )
+	 [ d e f ] x ( y ) = ( uv1 )
+	 [ g h i ]   ( z )   ( uv2 )
+	 
+	 And then if we can get the matrix into reduced eschelon form we can solve
+	 for (x y z) with no trouble.
 	 */
 
-	F32 x, y, z;
-
-	bool no_aei = (closeEnough(b*e, a*f) || closeEnough(a, 0.f));
-	bool no_eia = (closeEnough(f*i, e*j) || closeEnough(e, 0.f));
-	bool no_iae = (closeEnough(j*a, i*b) || closeEnough(i, 0.f));
-
-	//According to wolframalpha
-	//z = (-a f l+a h j+b e l-b h i-d e j+d f i)/(-a f k+a g j+b e k-b g i-c e j+c f i)
-	//y = (a g z-a h-c e z+d e)/(b e-a f)
-	//x = (-b y-c z+d)/a
-	//If b*e == a*f or a == 0 then we need to swap around the equations
-	//If all three have that same issue then we need to solve for another coord first
-
-	if (no_aei && no_eia && no_iae) {
-		//Urg we can't solve x y as the first two
-		//x = (-(d f k)/(c f-b g)+(b h k)/(c f-b g)+(c j z)/b-(d j)/b+l)/(-(a f k)/(c f-b g)-(a j)/b+(b e k)/(c f-b g)+i)
-		//z = (-a f x+b e x-b h+d f)/(c f-b g)
-		//y = (-a x-c z+d)/b
-
-		bool no_bjf = (closeEnough(c*f, b*g) || closeEnough(b, 0.f));
-		bool no_jfb = (closeEnough(g*j, f*k) || closeEnough(f, 0.f));
-		bool no_fbj = (closeEnough(k*b, j*c) || closeEnough(j, 0.f));
-
-		if (no_bjf && no_jfb && no_fbj) {
-			//We can't solve y z as the first two, last chance here
-			//y = (a h (g-k)+c h (i-e)+d e k-d g i)/(-a f k+a g j+b e k-b g i-c e j+c f i)
-			//x = (b k y+c h-c j y-d k)/(c i-a k)
-			//z = (h-j y-i x)/k
-
-			bool no_kcg = (closeEnough(c*i, a*k) || closeEnough(k, 0.f));
-			bool no_cgk = (closeEnough(g*a, e*c) || closeEnough(c, 0.f));
-			bool no_gkc = (closeEnough(k*e, i*g) || closeEnough(g, 0.f));
-
-			if (no_kcg && no_cgk && no_gkc) {
-				
-				std::cerr << "Couldn't solve plane (" << a << ", " << b << ", " << c << "), (" << e << ", " << f << ", " << g << "), (" << i << ", " << j << ", " << k << ") uv (" << d << ", " << h << ", " << l << ")" << std::endl;
-				return glm::vec3(0, 0, 0);
-			}
-
-			if (no_kcg) {
-				if (no_cgk) {
-					y = (i*d*(c-g)+k*d*(e-a)+l*a*g-l*c*e)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
-					x = (j*g*y+k*d-k*f*y-l*g)/(k*e-i*g);
-					z = (d-f*y-e*x)/g;
-				} else {
-					y = (e*l*(k-c)+g*l*(a-i)+h*i*c-h*k*a)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
-					x = (f*c*y+g*l-g*b*y-h*c)/(g*a-e*c);
-					z = (l-b*y-a*x)/c;
-				}
-			} else {
-				y = (a*h*(g-k)+c*h*(i-e)+d*e*k-d*g*i)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
-				x = (b*k*y+c*h-c*j*y-d*k)/(c*i-a*k);
-				z = (h-j*y-i*x)/k;
-			}
-
-			//Make sure it worked
-			assert(closeEnough(a*x + b*y + c*z, d));
-			assert(closeEnough(e*x + f*y + g*z, h));
-			assert(closeEnough(i*x + j*y + k*z, l));
+	//Swap around rows so that we can get something non-zero for [0][0]
+	if (closeEnough(pointMatrix[0][0], 0.f)) {
+		if (closeEnough(pointMatrix[1][0], 0.f)) {
+			swapRows(pointMatrix, 0, 2);
 		} else {
-			//Spiderweb party
-			if (no_bjf) {
-				if (no_fbj) {
-					x = (-j*c*h+j*d*g+k*b*h-k*d*f-l*b*g+l*c*f)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
-					z = (-i*b*x+j*a*x-j*d+l*b)/(k*b-j*c);
-					y = (-i*x-k*z+l)/j;
-				} else {
-					x = (-f*k*d+f*l*c+g*j*d-g*l*b-h*j*c+h*k*b)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
-					z = (-e*j*x+f*i*x-f*l+h*j)/(g*j-f*k);
-					y = (-e*x-g*z+h)/f;
-				}
-			} else {
-				x = (-b*g*l+b*h*k+c*f*l-c*h*j-d*f*k+d*g*j)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
-				z = (-a*f*x+b*e*x-b*h+d*f)/(c*f-b*g);
-				y = (-a*x-c*z+d)/b;
-			}
-
-			//Make sure it worked
-			assert(closeEnough(a*x + b*y + c*z, d));
-			assert(closeEnough(e*x + f*y + g*z, h));
-			assert(closeEnough(i*x + j*y + k*z, l));
+			swapRows(pointMatrix, 0, 1);
 		}
-	} else {
-		//Don't even bother trying to understand the math in this. I just kept plugging stuff
-		// into wolframalpha until the asserts at the end stopped failing.
-		if (no_aei) {
-			if (no_eia) {
-				z = (-i*b*h+i*d*f+j*a*h-j*d*e-l*a*f+l*b*e)/(-i*b*g+i*c*f+j*a*g-j*c*e-k*a*f+k*b*e);
-				y = (i*c*z-i*d-k*a*z+l*a)/(j*a-i*b);
-				x = (-j*y-k*z+l)/i;
-			} else {
-				z = (-e*j*d+e*l*b+f*i*d-f*l*a-h*i*b+h*j*a)/(-e*j*c+e*k*b+f*i*c-f*k*a-g*i*b+g*j*a);
-				y = (e*k*z-e*l-g*i*z+h*i)/(f*i-e*j);
-				x = (-f*y-g*z+h)/e;
-			}
-		} else {
-			z = (-a*f*l+a*h*j+b*e*l-b*h*i-d*e*j+d*f*i)/(-a*f*k+a*g*j+b*e*k-b*g*i-c*e*j+c*f*i);
-			y = (a*g*z-a*h-c*e*z+d*e)/(b*e-a*f);
-			x = (-b*y-c*z+d)/a;
+	}
+	//If all three have zero for [0][0] then we're fine here
+	if (!closeEnough(pointMatrix[0][0], 0.f)) {
+		/*
+		 Reduce second and third rows so the first column is zero
+		 To get
+		 [ a b c ]
+		 [ 0 d e ]
+		 [ 0 f g ]
+		 */
+		if (!closeEnough(pointMatrix[1][0], 0.f)) {
+			addRow(pointMatrix, 1, 0, -pointMatrix[1][0] / pointMatrix[0][0]);
+		}
+		if (!closeEnough(pointMatrix[2][0], 0.f)) {
+			addRow(pointMatrix, 2, 0, -pointMatrix[2][0] / pointMatrix[0][0]);
 		}
 	}
 
-	//Make sure it worked
-	assert(closeEnough(a*x + b*y + c*z, d));
-	assert(closeEnough(e*x + f*y + g*z, h));
-	assert(closeEnough(i*x + j*y + k*z, l));
+	//If mat[1][1] is zero we should swap rows 1 and 2 so we can reduce the other row
+	if (closeEnough(pointMatrix[1][1], 0.f)) {
+		swapRows(pointMatrix, 1, 2);
+	}
+	//If mat[1][1] is zero then both [1][1] and [2][1] are zero and we can continue
+	if (!closeEnough(pointMatrix[1][1], 0.f)) {
+		/*
+		 Reverse third row so the second column is zero
+		 To get
+		 [ a b c ]
+		 [ 0 d e ]
+		 [ 0 0 f ]
+		 */
+		if (!closeEnough(pointMatrix[2][1], 0.f)) {
+			addRow(pointMatrix, 2, 1, -pointMatrix[2][1] / pointMatrix[1][1]);
+		}
+	}
 
+	/*
+	 Scale each of the rows so the first component is one
+	 To get
+	 [ 1 a b ]
+	 [ 0 1 c ]
+	 [ 0 0 1 ]
+	 */
+	if (!closeEnough(pointMatrix[0][0], 0.f)) {
+		scaleRow(pointMatrix, 0, 1.0f / pointMatrix[0][0]);
+	}
+	if (!closeEnough(pointMatrix[1][1], 0.f)) {
+		scaleRow(pointMatrix, 1, 1.0f / pointMatrix[1][1]);
+	}
+	if (!closeEnough(pointMatrix[2][2], 0.f)) {
+		scaleRow(pointMatrix, 2, 1.0f / pointMatrix[2][2]);
+	}
+
+	/*
+	 At this point the matrix is
+
+	 [ 1 a b ]   ( x )   ( uv0' )
+	 [ 0 1 c ] x ( y ) = ( uv1' )
+	 [ 0 0 1 ]   ( z )   ( uv2' )
+
+	 where
+	 x + ay + bz = uv0
+	      y + cz = uv1
+	           z = uv2
+
+	 therefore
+	 z = uv2'
+	 y = uv1' - cz
+	 x = uv0' - ay - bz
+
+	 */
+
+	//Convenience
+	const glm::vec4 &xvec = pointMatrix[0];
+	const glm::vec4 &yvec = pointMatrix[1];
+	const glm::vec4 &zvec = pointMatrix[2];
+
+	//These are easy now
+	float z = zvec[3];
+	float y = yvec[3] - z * yvec[2];
+	float x = xvec[3] - y * xvec[1] - z * xvec[2];
+
+	//Check our work
+	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2], test[0][3]));
+	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2], test[1][3]));
+	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2], test[2][3]));
+
+	//And there we go
 	return glm::vec3(x, y, z);
 }
 
@@ -418,8 +440,23 @@ Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 
 								  glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2) {
 	Interior::TexGenEq texGen;
 
-	glm::vec3 xsolve = solveSystem(point0.x, point0.y, point0.z, uv0.x, point1.x, point1.y, point1.z, uv1.x, point2.x, point2.y, point2.z, uv2.x);
-	glm::vec3 ysolve = solveSystem(point0.x, point0.y, point0.z, uv0.y, point1.x, point1.y, point1.z, uv1.y, point2.x, point2.y, point2.z, uv2.y);
+	//Construct these matrices for the solver to figure out
+	glm::mat3x4	xTexMat = glm::mat3x4(glm::vec4(point0, uv0.x), glm::vec4(point1, uv1.x), glm::vec4(point2, uv2.x));
+	glm::mat3x4 yTexMat = glm::mat3x4(glm::vec4(point0, uv0.y), glm::vec4(point1, uv1.y), glm::vec4(point2, uv2.y));
+
+	//Solving is rather simple
+	glm::vec3 xsolve = solveMatrix(xTexMat);
+	glm::vec3 ysolve = solveMatrix(yTexMat);
+
+	//Rigorous checking because I don't like being wrong
+	assert(closeEnough(xsolve.x * point0.x + xsolve.y * point0.y + xsolve.z * point0.z, uv0.x));
+	assert(closeEnough(xsolve.x * point1.x + xsolve.y * point1.y + xsolve.z * point1.z, uv1.x));
+	assert(closeEnough(xsolve.x * point2.x + xsolve.y * point2.y + xsolve.z * point2.z, uv2.x));
+	assert(closeEnough(ysolve.x * point0.x + ysolve.y * point0.y + ysolve.z * point0.z, uv0.y));
+	assert(closeEnough(ysolve.x * point1.x + ysolve.y * point1.y + ysolve.z * point1.z, uv1.y));
+	assert(closeEnough(ysolve.x * point2.x + ysolve.y * point2.y + ysolve.z * point2.z, uv2.y));
+
+	//And there we go
 	texGen.planeX.x = xsolve.x;
 	texGen.planeX.y = xsolve.y;
 	texGen.planeX.z = xsolve.z;
