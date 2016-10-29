@@ -334,7 +334,7 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 	 [ d e f ] x ( y ) = ( uv1 )
 	 [ g h i ]   ( z )   ( uv2 )
 	 
-	 And then if we can get the matrix into reduced eschelon form we can solve
+	 And then if we can get the matrix into reduced echelon form we can solve
 	 for (x y z) with no trouble.
 	 */
 
