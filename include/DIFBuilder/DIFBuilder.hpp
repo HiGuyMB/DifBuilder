@@ -37,9 +37,10 @@ class DIFBuilder {
 public:
 	struct Point {
 		glm::vec3 vertex;
+		glm::vec3 normal;
 		glm::vec2 uv;
 
-		Point() : vertex(), uv() {
+		Point() : vertex(), uv(), normal() {
 
 		}
 		Point(const glm::vec3 &vertex, const glm::vec2 &uv) : vertex(vertex), uv(uv) {

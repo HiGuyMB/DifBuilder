@@ -26,6 +26,7 @@
 //-----------------------------------------------------------------------------
 
 #include <DIFBuilder/DIFBuilder.hpp>
+#include <iomanip>
 
 DIF_NAMESPACE
 
@@ -175,6 +176,7 @@ void DIFBuilder::build(DIF &dif) {
 		surface.texGenIndex = interior.texGenEq.size();
 		surface.surfaceFlags = 16; //todo: maybe we have some of these
 		surface.fanMask = 7; //todo: ??
+		surface.planeFlipped = 0;
 
 		//Lightmap stuff
 		surface.lightMap.finalWord = 0;
@@ -258,14 +260,17 @@ SphereF DIFBuilder::getBoundingSphere() {
 }
 
 glm::vec3 DIFBuilder::getAverageNormal(const Triangle &triangle) {
-	const glm::vec3 &point0 = triangle.points[0].vertex;
-	const glm::vec3 &point1 = triangle.points[1].vertex;
-	const glm::vec3 &point2 = triangle.points[2].vertex;
+	const glm::vec3 &point0 = triangle.points[0].normal;
+	const glm::vec3 &point1 = triangle.points[1].normal;
+	const glm::vec3 &point2 = triangle.points[2].normal;
+
+	//average
+	return (point0 + point1 + point2) / 3.0f;
 
 	//n = (v2 - v1) x (v2 - v0)
-	glm::vec3 crossNorm = glm::normalize(glm::cross(point2 - point1, point2 - point0));
+//	glm::vec3 crossNorm = glm::normalize(glm::cross(point2 - point1, point2 - point0));
 
-	return crossNorm;
+//	return crossNorm;
 }
 
 F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &center) {
@@ -290,8 +295,14 @@ F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &cent
 
 //Because floating point math sucks
 template<typename T>
-bool closeEnough(const T &p1, const T &p2) {
-	return glm::distance(p1, p2) < 0.0001f;
+bool closeEnough(const T &p1, const T &p2, const F32 distance = 0.0001f) {
+	return glm::distance(p1, p2) < distance;
+}
+
+std::ostream &operator<<(std::ostream &stream, const glm::mat3x4 &input) {
+	return stream << std::setw(10) << input[0][0] << " " << std::setw(10) << input[0][1] << " " << std::setw(10) << input[0][2] << " " << std::setw(10) << input[0][3] << std::endl
+	              << std::setw(10) << input[1][0] << " " << std::setw(10) << input[1][1] << " " << std::setw(10) << input[1][2] << " " << std::setw(10) << input[1][3] << std::endl
+	              << std::setw(10) << input[2][0] << " " << std::setw(10) << input[2][1] << " " << std::setw(10) << input[2][2] << " " << std::setw(10) << input[2][3] << std::endl;
 }
 
 //The 3 elementary matrix row operations that you can apply without changing the result
@@ -305,8 +316,11 @@ void addRow(glm::mat3x4 &mat, int destRow, int srcRow, float factor) {
 	mat[destRow] += mat[srcRow] * factor;
 }
 
-glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
+glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
+#define MaybePrint(a) if (print) { std::cout << a << std::endl; }
+
 	//Clean up stuff that is almost zero
+	MaybePrint(pointMatrix);
 	if (closeEnough(pointMatrix[0][0], 0.f)) pointMatrix[0][0] = 0.f;
 	if (closeEnough(pointMatrix[1][0], 0.f)) pointMatrix[1][0] = 0.f;
 	if (closeEnough(pointMatrix[2][0], 0.f)) pointMatrix[2][0] = 0.f;
@@ -319,6 +333,7 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 	if (closeEnough(pointMatrix[0][3], 0.f)) pointMatrix[0][3] = 0.f;
 	if (closeEnough(pointMatrix[1][3], 0.f)) pointMatrix[1][3] = 0.f;
 	if (closeEnough(pointMatrix[2][3], 0.f)) pointMatrix[2][3] = 0.f;
+	MaybePrint(pointMatrix);
 
 	//For checking at the end
 	glm::mat3x4 test = pointMatrix;
@@ -342,8 +357,10 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 	if (closeEnough(pointMatrix[0][0], 0.f)) {
 		if (closeEnough(pointMatrix[1][0], 0.f)) {
 			swapRows(pointMatrix, 0, 2);
+			MaybePrint(pointMatrix);
 		} else {
 			swapRows(pointMatrix, 0, 1);
+			MaybePrint(pointMatrix);
 		}
 	}
 	//If all three have zero for [0][0] then we're fine here
@@ -357,15 +374,18 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 		 */
 		if (!closeEnough(pointMatrix[1][0], 0.f)) {
 			addRow(pointMatrix, 1, 0, -pointMatrix[1][0] / pointMatrix[0][0]);
+			MaybePrint(pointMatrix);
 		}
 		if (!closeEnough(pointMatrix[2][0], 0.f)) {
 			addRow(pointMatrix, 2, 0, -pointMatrix[2][0] / pointMatrix[0][0]);
+			MaybePrint(pointMatrix);
 		}
 	}
 
 	//If mat[1][1] is zero we should swap rows 1 and 2 so we can reduce the other row
 	if (closeEnough(pointMatrix[1][1], 0.f)) {
 		swapRows(pointMatrix, 1, 2);
+		MaybePrint(pointMatrix);
 	}
 	//If mat[1][1] is zero then both [1][1] and [2][1] are zero and we can continue
 	if (!closeEnough(pointMatrix[1][1], 0.f)) {
@@ -378,6 +398,7 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 		 */
 		if (!closeEnough(pointMatrix[2][1], 0.f)) {
 			addRow(pointMatrix, 2, 1, -pointMatrix[2][1] / pointMatrix[1][1]);
+			MaybePrint(pointMatrix);
 		}
 	}
 
@@ -388,14 +409,17 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 	 [ 0 1 c ]
 	 [ 0 0 1 ]
 	 */
-	if (!closeEnough(pointMatrix[0][0], 0.f)) {
+	if (!closeEnough(pointMatrix[0][0], 0.f, 0.00001f)) {
 		scaleRow(pointMatrix, 0, 1.0f / pointMatrix[0][0]);
+		MaybePrint(pointMatrix);
 	}
-	if (!closeEnough(pointMatrix[1][1], 0.f)) {
+	if (!closeEnough(pointMatrix[1][1], 0.f, 0.00001f)) {
 		scaleRow(pointMatrix, 1, 1.0f / pointMatrix[1][1]);
+		MaybePrint(pointMatrix);
 	}
-	if (!closeEnough(pointMatrix[2][2], 0.f)) {
+	if (!closeEnough(pointMatrix[2][2], 0.f, 0.00001f)) {
 		scaleRow(pointMatrix, 2, 1.0f / pointMatrix[2][2]);
+		MaybePrint(pointMatrix);
 	}
 
 	/*
@@ -428,9 +452,9 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix) {
 	float x = xvec[3] - y * xvec[1] - z * xvec[2];
 
 	//Check our work
-	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2], test[0][3]));
-	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2], test[1][3]));
-	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2], test[2][3]));
+//	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2], test[0][3]));
+//	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2], test[1][3]));
+//	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2], test[2][3]));
 
 	//And there we go
 	return glm::vec3(x, y, z);
@@ -449,12 +473,24 @@ Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 
 	glm::vec3 ysolve = solveMatrix(yTexMat);
 
 	//Rigorous checking because I don't like being wrong
-	assert(closeEnough(xsolve.x * point0.x + xsolve.y * point0.y + xsolve.z * point0.z, uv0.x));
-	assert(closeEnough(xsolve.x * point1.x + xsolve.y * point1.y + xsolve.z * point1.z, uv1.x));
-	assert(closeEnough(xsolve.x * point2.x + xsolve.y * point2.y + xsolve.z * point2.z, uv2.x));
-	assert(closeEnough(ysolve.x * point0.x + ysolve.y * point0.y + ysolve.z * point0.z, uv0.y));
-	assert(closeEnough(ysolve.x * point1.x + ysolve.y * point1.y + ysolve.z * point1.z, uv1.y));
-	assert(closeEnough(ysolve.x * point2.x + ysolve.y * point2.y + ysolve.z * point2.z, uv2.y));
+	if (!closeEnough(xsolve.x * point0.x + xsolve.y * point0.y + xsolve.z * point0.z, uv0.x, 0.001f)) {
+		solveMatrix(xTexMat, true);
+	}
+	if (!closeEnough(xsolve.x * point1.x + xsolve.y * point1.y + xsolve.z * point1.z, uv1.x, 0.001f)) {
+		solveMatrix(xTexMat, true);
+	}
+	if (!closeEnough(xsolve.x * point2.x + xsolve.y * point2.y + xsolve.z * point2.z, uv2.x, 0.001f)) {
+		solveMatrix(xTexMat, true);
+	}
+	if (!closeEnough(ysolve.x * point0.x + ysolve.y * point0.y + ysolve.z * point0.z, uv0.y, 0.001f)) {
+		solveMatrix(yTexMat, true);
+	}
+	if (!closeEnough(ysolve.x * point1.x + ysolve.y * point1.y + ysolve.z * point1.z, uv1.y, 0.001f)) {
+		solveMatrix(yTexMat, true);
+	}
+	if (!closeEnough(ysolve.x * point2.x + ysolve.y * point2.y + ysolve.z * point2.z, uv2.y, 0.001f)) {
+		solveMatrix(yTexMat, true);
+	}
 
 	//And there we go
 	texGen.planeX.x = xsolve.x;
