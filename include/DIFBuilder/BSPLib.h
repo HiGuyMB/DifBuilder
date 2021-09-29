@@ -71,7 +71,19 @@ struct BSPNode
 	BSPNode* Front = NULL;
 	BSPNode* Back = NULL;
 	Polygon* poly = NULL;
-	glm::vec3* center = NULL;;
+	bool hasCenter = false;
+	glm::vec3 center;
+};
+
+class BSPNodeAllocator
+{
+	std::vector<BSPNode*> nodes;
+
+public:
+	BSPNodeAllocator();
+	~BSPNodeAllocator();
+
+	BSPNode* allocate();
 };
 
 
@@ -90,14 +102,15 @@ struct Polygon
 	long TextureIndex = 0;
 	BSPNode* node = NULL;
 	bool IsUsed = false;
+	int surfaceIndex = -1;
 };
 
-std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes);
+std::vector<BSPNode*> BuildBSP(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc);
 
-BSPNode* BuildBSPRecurse(std::vector<BSPNode> Nodes);
+BSPNode* BuildBSPRecurse(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc);
 
 //void SplitPolygon(POLYGON *Poly, Plane *Plane, POLYGON *FrontSplit, POLYGON *BackSplit);
 
 //bool Get_Intersect(glm::vec3 *linestart, glm::vec3 *lineend, glm::vec3 *vertex, glm::vec3 *normal, glm::vec3 & intersection, float &percentage);
 //void DeletePolygon(POLYGON *Poly);
-void GatherBrushes(BSPNode node, std::vector<Polygon>* list);
+void GatherBrushes(BSPNode* node, std::vector<Polygon*>* list);

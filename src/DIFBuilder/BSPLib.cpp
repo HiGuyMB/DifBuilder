@@ -48,11 +48,32 @@ public:
 
 typedef nanoflann::KDTreeSingleIndexDynamicAdaptor<nanoflann::L2_Simple_Adaptor<double,PointList<double>>,PointList<double>,3> SearchTree;
 
-void GatherBrushes(BSPNode node, std::vector<Polygon>* list)
+BSPNodeAllocator::BSPNodeAllocator()
 {
-	if (node.IsLeaf)
+
+}
+
+BSPNodeAllocator::~BSPNodeAllocator()
+{
+	for (auto& node : nodes)
 	{
-		list->push_back(*node.poly);
+		delete node;
+	}
+}
+
+BSPNode* BSPNodeAllocator::allocate()
+{
+	BSPNode* node = new BSPNode();
+	this->nodes.push_back(node);
+	return node;
+}
+
+void GatherBrushes(BSPNode* node, std::vector<Polygon*>* list)
+{
+	if (node->IsLeaf)
+	{
+		if (std::find(list->begin(), list->end(), node->poly) == list->end())
+			list->push_back(node->poly);
 		//if (node.FrontLeaf != NULL)
 		//{
 		//	for (int i = 0; i < node.FrontLeaf->polygons.size(); i++)
@@ -66,20 +87,15 @@ void GatherBrushes(BSPNode node, std::vector<Polygon>* list)
 	}
 	else
 	{
-		if (node.Front != NULL)
+		if (node->Front != NULL)
 		{
-			GatherBrushes(*node.Front, list);
+			GatherBrushes(node->Front, list);
 		}
-		if (node.Back != NULL)
+		if (node->Back != NULL)
 		{
-			GatherBrushes(*node.Back, list);
+			GatherBrushes(node->Back, list);
 		}
 	}
-}
-
-int hashpt(glm::vec3 pt)
-{
-	return std::hash<double>()(pt.x) ^ std::hash<double>()(pt.y) ^ std::hash<double>()(pt.z);
 }
 
 void CalculateCenter(BSPNode* bsp)
@@ -92,7 +108,8 @@ void CalculateCenter(BSPNode* bsp)
 
 		centroid /= bsp->poly->VertexList.size();
 
-		bsp->center = new glm::vec3(centroid);
+		bsp->center = glm::vec3(centroid);
+		bsp->hasCenter = true;
 	}
 	else
 	{
@@ -100,23 +117,24 @@ void CalculateCenter(BSPNode* bsp)
 		int c = 0;
 		if (bsp->Front != NULL)
 		{
-			if (bsp->Front->center == NULL)
+			if (!bsp->Front->hasCenter)
 				CalculateCenter(bsp->Front);
 
 			c++;
-			avgcenter += *(bsp->Front->center);
+			avgcenter += (bsp->Front->center);
 		}
 		if (bsp->Back != NULL)
 		{
-			if (bsp->Back->center == NULL)
+			if (!bsp->Back->hasCenter)
 				CalculateCenter(bsp->Back);
 
 			c++;
-			avgcenter += *(bsp->Back->center);
+			avgcenter += (bsp->Back->center);
 		}
 		avgcenter /= c;
 
-		bsp->center = new glm::vec3(avgcenter);
+		bsp->center = glm::vec3(avgcenter);
+		bsp->hasCenter = true;
 	}
 }
 
@@ -125,28 +143,26 @@ std::string prettifyBSP(BSPNode n)
 
 	std::stringstream s;
 
-	s << "{ IsLeaf : \"" << n.IsLeaf << "\", Plane : \"" << n.plane.normal.x << " " << n.plane.normal.y << " " << n.plane.normal.z << " " << n.plane.d << "\", Front : " << ((n.Front == NULL) ? "null" : prettifyBSP(*n.Front)) << ", Back : " << ((n.Back == NULL) ? "null" : prettifyBSP(*n.Back)) << ", Center : \"" << n.center->x << " " << n.center->y << " " << n.center->z << "\" }";
+	s << "{ IsLeaf : \"" << n.IsLeaf << "\", Plane : \"" << n.plane.normal.x << " " << n.plane.normal.y << " " << n.plane.normal.z << " " << n.plane.d << "\", Front : " << ((n.Front == NULL) ? "null" : prettifyBSP(*n.Front)) << ", Back : " << ((n.Back == NULL) ? "null" : prettifyBSP(*n.Back)) << ", Center : \"" << n.center.x << " " << n.center.y << " " << n.center.z << "\" }";
 
 	return s.str();
 }
 
-std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes)
+std::vector<BSPNode*> BuildBSP(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc)
 {
 
 	std::vector<glm::vec3> pts;
-	std::map<int, BSPNode*> centertobspmap;
 	for (auto& it : Nodes)
 	{
-		CalculateCenter(&it);
-		pts.push_back(*it.center);
-		centertobspmap.insert(std::pair<int, BSPNode*>(hashpt(*it.center), &it));
+		CalculateCenter(it);
+		pts.push_back(it->center);
 	}
 
 	float minx = -100000, miny = -100000, minz = -100000, maxx = 100000, maxy = 100000, maxz = 100000;
 
 	for (auto& it : Nodes)
 	{
-		auto v = *it.center;
+		auto v = it->center;
 		if (v.x < minx) minx = v.x;
 		if (v.y < miny) miny = v.y;
 		if (v.z < minz) minz = v.z;
@@ -167,7 +183,7 @@ std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes)
 
 	//finder.initialize(pts, unibn::OctreeParams());
 
-	std::vector<BSPNode> newnodes;
+	std::vector<BSPNode*> newnodes;
 	std::vector<bool> containedptlist = std::vector<bool>();
 	for (int i = 0; i < pts.size(); i++)
 	{
@@ -182,7 +198,7 @@ std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes)
 
 		if (i == pts.size() - 1)
 		{
-			newnodes.push_back(*centertobspmap[hashpt(pts[i])]);
+			newnodes.push_back(Nodes[i]);
 			break;
 		}
 
@@ -208,11 +224,11 @@ std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes)
 
 		Plane p = Plane(center, nb - pt);
 
-		BSPNode node;
-		node.center = new glm::vec3(center);
-		node.Front = new BSPNode(*centertobspmap.at(hashpt(nb)));
-		node.Back = new BSPNode(*centertobspmap[hashpt(pt)]);
-		node.plane = p;
+		BSPNode* node = alloc.allocate();
+		node->center = glm::vec3(center);
+		node->Front = Nodes[retIndex];
+		node->Back = Nodes[i];
+		node->plane = p;
 		newnodes.push_back(node);
 
 		finder.removePoint(retIndex);
@@ -227,13 +243,13 @@ std::vector<BSPNode>* BuildBSP(std::vector<BSPNode> Nodes)
 	//	std::string pretty = prettifyBSP(n);
 	//}
 
-	return new std::vector<BSPNode>(newnodes);
+	return newnodes;
 }
 
-BSPNode* BuildBSPRecurse(std::vector<BSPNode> Nodes)
+BSPNode* BuildBSPRecurse(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc)
 {
 	while (Nodes.size() > 1)
-		Nodes = *BuildBSP(Nodes);
+		Nodes = BuildBSP(Nodes, alloc);
 
-	return new BSPNode(Nodes[0]);
+	return Nodes[0];
 }

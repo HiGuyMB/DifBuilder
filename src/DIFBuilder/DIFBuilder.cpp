@@ -53,11 +53,26 @@ DIFBuilder::DIFBuilder(const DIF &dif) : mScale(1.0f) {
 	//TODO: Extract triangles
 }
 
+bool checkTriangle(const DIFBuilder::Triangle& triangle)
+{
+	glm::vec3 ab = triangle.points[1].vertex - triangle.points[0].vertex;
+	glm::vec3 ac = triangle.points[2].vertex - triangle.points[0].vertex;
+	glm::vec3 cp = glm::cross(ab, ac);
+	if (glm::dot(cp, cp) <= 0.001f)
+		return false;
+	return true;
+}
+
 void DIFBuilder::addTriangle(const Triangle &triangle) {
+	if (!checkTriangle(triangle))
+		return;
 	mTriangles.push_back(triangle);
 }
 
 void DIFBuilder::addTriangle(const Triangle &triangle, const std::string &material) {
+	if (!checkTriangle(triangle))
+		return;
+
 	Triangle tri(triangle);
 
 	//Find the material
@@ -89,7 +104,7 @@ void DIFBuilder::addTrigger(const Trigger& trigger)
 }
 
 //Here come the dif writing functions, algorithm is nearly the same as the ones used in map2dif
-short ExportPlane(Interior *interior, Polygon poly, std::unordered_map<int, int>* planehashes)
+short ExportPlane(Interior *interior, Polygon& poly, std::unordered_map<int, int>& planehashes, std::unordered_map<int, int>& normalhashes)
 {
 	Plane testplane = Plane(poly.VertexList[poly.Indices[0]].p, poly.VertexList[poly.Indices[1]].p, poly.VertexList[poly.Indices[2]].p);
 	std::size_t xhash = std::hash<float>()(testplane.normal.x);
@@ -99,28 +114,36 @@ short ExportPlane(Interior *interior, Polygon poly, std::unordered_map<int, int>
 
 	int hash = xhash ^ yhash ^ zhash ^ dhash;
 
-	if (planehashes->find(hash) != planehashes->end())
-		return (short)planehashes->at(hash);
-
-	//for (int i = 0; i < planehashes->size(); i++)
-	//	if (planehashes->at(i).hash == hash)
-	//		return planehashes->at(i).obj;
+	if (planehashes.find(hash) != planehashes.end()) {
+		return (short)planehashes.at(hash);
+	}
 
 	int index = interior->plane.size();
 
-	Interior::Plane p = Interior::Plane();
-	
-	int normindex = interior->normal.size();
+	if (index >= 32767)
+		throw new std::exception("Out of plane indices");
 
+	Interior::Plane p = Interior::Plane();
+
+	// Now check normal crap
+	std::size_t xhash3 = std::hash<float>()(testplane.normal.x);
+	std::size_t yhash3 = std::hash<float>()(testplane.normal.y);
+	std::size_t zhash3 = std::hash<float>()(testplane.normal.z);
+	int hash3 = xhash3 ^ yhash3 ^ zhash3;
+	int normindex;
+
+	normindex = interior->normal.size();
 	interior->normal.push_back(testplane.normal);
 	interior->normal2.push_back(testplane.normal);
+	normalhashes.insert(std::make_pair(hash3, normindex));
+	
 
 	p.normalIndex = normindex;
 	p.planeDistance = testplane.d;
 
 	interior->plane.push_back(p);
 
-	(*planehashes)[hash] = index;
+	planehashes.insert(std::make_pair(hash, index));
 
 	//ObjectHash o = ObjectHash();
 	//o.hash = hash;
@@ -132,7 +155,7 @@ short ExportPlane(Interior *interior, Polygon poly, std::unordered_map<int, int>
 
 }
 
-short ExportPlane(Interior *interior, Plane pl, std::unordered_map<int, int>* planehashes)
+short ExportPlane(Interior *interior, Plane& pl, std::unordered_map<int, int>& planehashes, std::unordered_map<int, int>& normalhashes)
 {
 	std::size_t xhash = std::hash<float>()(pl.normal.x);
 	std::size_t yhash = std::hash<float>()(pl.normal.y);
@@ -141,24 +164,33 @@ short ExportPlane(Interior *interior, Plane pl, std::unordered_map<int, int>* pl
 
 	int hash = xhash ^ yhash ^ zhash ^ dhash;
 
-	if (planehashes->find(hash) != planehashes->end())
-		return (short)planehashes->at(hash);
+	if (planehashes.find(hash) != planehashes.end())
+		return (short)planehashes.at(hash);
 
 	int index = interior->plane.size();
 
+	if (index >= 32767)
+		throw new std::exception("Out of plane indices");
+
 	Interior::Plane p = Interior::Plane();
 
-	int normindex = interior->normal.size();
+	// Now check normal crap
+	std::size_t xhash3 = std::hash<float>()(pl.normal.x);
+	std::size_t yhash3 = std::hash<float>()(pl.normal.y);
+	std::size_t zhash3 = std::hash<float>()(pl.normal.z);
+	int hash3 = xhash3 ^ yhash3 ^ zhash3;
+	int normindex;
 
+	normindex = interior->normal.size();
 	interior->normal.push_back(pl.normal);
 	interior->normal2.push_back(pl.normal);
-
+	normalhashes.insert(std::make_pair(hash3, normindex));
 	p.normalIndex = normindex;
 	p.planeDistance = pl.d;
 
 	interior->plane.push_back(p);
 
-	(*planehashes)[hash] = index;
+	planehashes.insert(std::make_pair(hash, index));
 
 	//ObjectHash o = ObjectHash();
 	//o.hash = hash;
@@ -181,7 +213,7 @@ short ExportTexture(Interior *interior,std::string tex)
 	return index;
 }
 
-short ExportTexGen(Interior *interior, Polygon poly)
+short ExportTexGen(Interior *interior, Polygon& poly)
 {
 	glm::vec3 v1 = poly.VertexList[poly.Indices[0]].p;
 	glm::vec3 v2 = poly.VertexList[poly.Indices[1]].p;
@@ -198,7 +230,7 @@ short ExportTexGen(Interior *interior, Polygon poly)
 	return index;
 }
 
-int ExportPoint(Interior *interior, glm::vec3 p, std::unordered_map<int, int>* pointhashes)
+int ExportPoint(Interior *interior, glm::vec3 p, std::unordered_map<int, int>& pointhashes)
 {
 	std::size_t xhash = std::hash<float>{}(p.x);
 	std::size_t yhash = std::hash<float>{}(p.y);
@@ -206,8 +238,8 @@ int ExportPoint(Interior *interior, glm::vec3 p, std::unordered_map<int, int>* p
 
 	int hash = xhash ^ yhash ^ zhash;
 
-	if (pointhashes->find(hash) != pointhashes->end())
-		return pointhashes->at(hash);
+	if (pointhashes.find(hash) != pointhashes.end())
+		return pointhashes.at(hash);
 
 	//
 	//for (int i = 0; i < pointhashes->size(); i++)
@@ -219,7 +251,7 @@ int ExportPoint(Interior *interior, glm::vec3 p, std::unordered_map<int, int>* p
 	interior->point.push_back(p);
 	interior->pointVisibility.push_back(-1);
 
-	(*pointhashes)[hash] = index;
+	pointhashes.insert(std::make_pair(hash, index));
 
 	//ObjectHash o = ObjectHash();
 	//o.hash = hash;
@@ -228,7 +260,7 @@ int ExportPoint(Interior *interior, glm::vec3 p, std::unordered_map<int, int>* p
 	return index;
 }
 
-void ExportWinding(Interior *interior, Polygon poly, std::unordered_map<int, int>* pointhashes)
+void ExportWinding(Interior *interior, Polygon& poly, std::unordered_map<int, int>& pointhashes)
 {
 	std::vector<int> finalWinding = std::vector<int>();
 
@@ -248,14 +280,14 @@ void ExportWinding(Interior *interior, Polygon poly, std::unordered_map<int, int
 		interior->index.push_back(finalWinding[i]);
 }
 
-void ExportSurfaces(Interior *interior, std::vector<Polygon> polys, std::unordered_map<int, int>* planehashes,std::vector<std::string> materialList, std::unordered_map<int, int>* pointhashes)
+void ExportSurfaces(Interior *interior, std::vector<Polygon>& polys, std::unordered_map<int, int>& planehashes,std::vector<std::string> materialList, std::unordered_map<int, int>& pointhashes, std::unordered_map<int, int>& normalhashes)
 {
 	for (int i = 0; i < polys.size(); i++)
 	{
 		Polygon poly = polys[i];
 
 		Interior::Surface rSurface = Interior::Surface();
-		rSurface.planeIndex = ExportPlane(interior, poly, planehashes);
+		rSurface.planeIndex = ExportPlane(interior, poly, planehashes, normalhashes);
 		rSurface.textureIndex = ExportTexture(interior, materialList[poly.TextureIndex]);
 		rSurface.texGenIndex = ExportTexGen(interior, poly);
 		rSurface.surfaceFlags = 16;
@@ -277,20 +309,25 @@ void ExportSurfaces(Interior *interior, std::vector<Polygon> polys, std::unorder
 	}
 }
 
-int ExportSurface(Interior *interior, Polygon poly, std::unordered_map<int, int>* planehashes, std::vector<std::string> materialList, std::unordered_map<int, int>* pointhashes)
+int ExportSurface(Interior *interior, Polygon& poly, std::unordered_map<int, int>& planehashes, std::vector<std::string> materialList, std::unordered_map<int, int>& pointhashes, std::unordered_map<int, int>& normalhashes)
 {
 	int ret = interior->surface.size();
+	poly.surfaceIndex = ret;
 	Interior::Surface rSurface = Interior::Surface();
-	rSurface.planeIndex = ExportPlane(interior, poly, planehashes);
+	rSurface.planeIndex = ExportPlane(interior, poly, planehashes, normalhashes);
 	rSurface.textureIndex = ExportTexture(interior, materialList[poly.TextureIndex]);
 	rSurface.texGenIndex = ExportTexGen(interior, poly);
 	rSurface.surfaceFlags = 16;
-	rSurface.fanMask = 15;
 	ExportWinding(interior, poly, pointhashes);
 	Interior::WindingIndex last = interior->windingIndex.back();
 	rSurface.windingStart = last.windingStart;
 	rSurface.windingCount = last.windingCount;
 	interior->windingIndex.pop_back();
+	rSurface.fanMask = 0;
+	for (int i = 0; i < rSurface.windingCount; i++)
+	{
+		rSurface.fanMask |= (1 << i);
+	}
 	rSurface.lightCount = 0;
 	rSurface.lightStateInfoStart = 0;
 	rSurface.mapSizeX = 0;
@@ -317,9 +354,9 @@ int CreateLeafIndex(int baseIndex, bool isSolid)
 	return baseRet | baseIndex;
 }
 
-int ExportBSP(Interior *interior, BSPNode n, std::vector<Polygon>* polys, std::unordered_map<int, int>* planehashes, std::vector<std::string> materialList, std::unordered_map<int, int>* pointhashes, std::vector<Polygon>* orderedpolys)
+int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, std::unordered_map<int, int>& planehashes, std::vector<std::string> materialList, std::unordered_map<int, int>& pointhashes, std::vector<Polygon*>* orderedpolys, std::unordered_map<int, int>& normalhashes)
 {
-	if (n.IsLeaf)
+	if (n->IsLeaf)
 	{
 		int leafindex = interior->bspSolidLeaf.size();
 
@@ -341,8 +378,8 @@ int ExportBSP(Interior *interior, BSPNode n, std::vector<Polygon>* polys, std::u
 		//		leafPolyIndices.push_back(i);
 		//	}
 
-		leafPolyIndices.push_back(ExportSurface(interior, *n.poly, planehashes, materialList, pointhashes));
-		orderedpolys->push_back(*n.poly);
+		leafPolyIndices.push_back(ExportSurface(interior, *n->poly, planehashes, materialList, pointhashes, normalhashes));
+		orderedpolys->push_back(n->poly);
 
 		for (int i = 0; i < leafPolyIndices.size(); i++)
 		{
@@ -358,20 +395,31 @@ int ExportBSP(Interior *interior, BSPNode n, std::vector<Polygon>* polys, std::u
 		Interior::BSPNode bspnode = Interior::BSPNode();
 		int nodeindex = interior->bspNode.size();
 		interior->bspNode.push_back(bspnode);
-		interior->bspNode[nodeindex].planeIndex = ExportPlane(interior, n.plane, planehashes);
-		if (n.Front != NULL)
-			interior->bspNode[nodeindex].frontIndex = ExportBSP(interior, *n.Front, polys, planehashes,materialList,pointhashes, orderedpolys);
-		else
-			interior->bspNode[nodeindex].frontIndex = CreateLeafIndex(0, false);
-		if (n.Back != NULL)
-			interior->bspNode[nodeindex].backIndex = ExportBSP(interior, *n.Back, polys, planehashes,materialList,pointhashes, orderedpolys);
-		else		 
-			interior->bspNode[nodeindex].backIndex = CreateLeafIndex(0, false);
+		Interior::BSPNode* nodeptr = &interior->bspNode[nodeindex];
+		nodeptr->planeIndex = ExportPlane(interior, n->plane, planehashes, normalhashes);
+		if (n->Front != NULL) {
+			nodeptr = &interior->bspNode[nodeindex];
+			int frontIndex = ExportBSP(interior, n->Front, polys, planehashes, materialList, pointhashes, orderedpolys, normalhashes);
+			interior->bspNode[nodeindex].frontIndex = frontIndex;
+		}
+		else {
+			nodeptr = &interior->bspNode[nodeindex];
+			int frontIndex = CreateLeafIndex(0, false);
+			interior->bspNode[nodeindex].frontIndex = frontIndex;
+		}
+		if (n->Back != NULL) {
+			int backIndex = ExportBSP(interior, n->Back, polys, planehashes, materialList, pointhashes, orderedpolys, normalhashes);
+			interior->bspNode[nodeindex].backIndex = backIndex;
+		}
+		else {
+			nodeptr->backIndex = CreateLeafIndex(0, false);
+			nodeptr = &interior->bspNode[nodeindex];
+		}
 		return nodeindex;
 	}
 }
 
-int ExportEmitString(Interior* interior,std::vector<U8> emitstring, std::vector<ObjectHash>* emitstrHashes)
+int ExportEmitString(Interior* interior,std::vector<U8>& emitstring, std::vector<ObjectHash>* emitstrHashes)
 {
 	// Search for already included strings.
 
@@ -416,7 +464,7 @@ int ExportEmitString(Interior* interior,std::vector<U8> emitstring, std::vector<
 	//}
 }
 
-void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon>> polys, std::unordered_map<int, int>* pointHashes, std::unordered_map<int, int>* planeHashes,std::vector<ObjectHash>* emitstrHashes,bool exportEmitStrings = false)
+void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> polys, std::unordered_map<int, int>& pointHashes, std::unordered_map<int, int>& planeHashes,std::vector<ObjectHash>* emitstrHashes, std::unordered_map<int, int>& normalhashes,bool exportEmitStrings = false)
 {
 	for (int polyIndex = 0; polyIndex < polys.size(); polyIndex++)
 	{
@@ -424,14 +472,19 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon>> pol
 		hull.surfaceStart = interior->hullSurfaceIndex.size();
 		hull.surfaceCount = polys[polyIndex].size();
 
-		for (int i = 0; i < hull.surfaceCount; i++)
-			interior->hullSurfaceIndex.push_back(hull.surfaceStart + i);
+		for (int i = 0; i < hull.surfaceCount; i++) {
+			if (polys[polyIndex][i]->surfaceIndex == -1) {
+				printf("%d %d", polyIndex, i);
+				throw new std::exception("Invalid surface index");
+			}
+			interior->hullSurfaceIndex.push_back(polys[polyIndex][i]->surfaceIndex);
+		}
 
 		hull.hullStart = interior->hullIndex.size();
 		hull.hullCount = 0;
 
 		for (int i = 0; i < polys[polyIndex].size(); i++)
-			hull.hullCount += polys[polyIndex][i].VertexList.size();
+			hull.hullCount += polys[polyIndex][i]->VertexList.size();
 
 		std::vector<int> hullPoints = std::vector<int>();
 		std::vector<HullPoly> hullpolys = std::vector<HullPoly>();
@@ -442,15 +495,15 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon>> pol
 		{
 			HullPoly hp = HullPoly();
 			hp.points = std::vector<int>();
-			for (int j = 0; j < polys[polyIndex][i].Indices.size(); j++)
+			for (int j = 0; j < polys[polyIndex][i]->Indices.size(); j++)
 			{
-				int pt = ExportPoint(interior, polys[polyIndex][i].VertexList[polys[polyIndex][i].Indices[j]].p, pointHashes);
+				int pt = ExportPoint(interior, polys[polyIndex][i]->VertexList[polys[polyIndex][i]->Indices[j]].p, pointHashes);
 				interior->hullIndex.push_back(pt);
 				interior->polyListPointIndex.push_back(pt);
 				hp.points.push_back(pt);
 				hullPoints.push_back(pt);
 			}
-			hp.planeIndex = ExportPlane(interior, polys[polyIndex][i], planeHashes);
+			hp.planeIndex = ExportPlane(interior, *polys[polyIndex][i], planeHashes, normalhashes);
 			hullpolys.push_back(hp);
 		}
 
@@ -459,7 +512,7 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon>> pol
 
 		for (int i = 0; i < polys[polyIndex].size(); i++)
 		{
-			int planeindex = ExportPlane(interior, polys[polyIndex][i], planeHashes);
+			int planeindex = ExportPlane(interior, *polys[polyIndex][i], planeHashes, normalhashes);
 			interior->polyListPlaneIndex.push_back(planeindex);
 			interior->hullPlaneIndex.push_back(planeindex);
 		}
@@ -473,9 +526,9 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon>> pol
 
 		for (int i = 0; i < polys[polyIndex].size(); i++)
 		{
-			for (int j = 0; j < polys[polyIndex][i].VertexList.size(); j++)
+			for (int j = 0; j < polys[polyIndex][i]->VertexList.size(); j++)
 			{
-				glm::vec3 v = polys[polyIndex][i].VertexList[j].p;
+				glm::vec3 v = polys[polyIndex][i]->VertexList[j].p;
 				if (v.x < minx)
 					minx = v.x;
 				if (v.y < miny)
@@ -859,88 +912,113 @@ void DIFBuilder::build(DIF &dif,bool flipNormals)
 
 	printf("Generating BSP\n");
 
-	std::vector<BSPNode> nodes;
+	BSPNodeAllocator* nodeAlloc = new BSPNodeAllocator();
+
+	std::vector<BSPNode*> nodes;
 	for (auto& poly : polyList)
 	{
-		BSPNode n;
-		BSPNode* leafnode = new BSPNode();
+		BSPNode* n = nodeAlloc->allocate();
+		BSPNode* leafnode = nodeAlloc->allocate();
 		leafnode->IsLeaf = true;
 		leafnode->poly = &poly;
-		n.Front = leafnode;
-		n.plane = Plane(poly.VertexList[0].p, poly.Normal);
+		n->Front = leafnode;
+		n->plane = Plane(poly.VertexList[0].p, poly.Normal);
 		nodes.push_back(n);
 	}
 	
-	BSPNode* root = BuildBSPRecurse(nodes);
+	BSPNode* root = BuildBSPRecurse(nodes, *nodeAlloc);
+
+	//for (auto& poly : polyList)
+	//{
+	//	if (poly.surfaceIndex == -1) {
+	//		throw new std::exception("Polygon not used!");
+	//	}
+	//}
 
 	printf("Gathering primitives\n");
-	std::vector<Polygon> polys = std::vector<Polygon>();
-	std::vector<Polygon> orderedpolys;
-	GatherBrushes(*root, &polys);
+	std::vector<Polygon*> polys = std::vector<Polygon*>();
+	std::vector<Polygon*>* orderedpolys = new std::vector<Polygon*>();
+	// polys.clear();
+	// GatherBrushes(root, &polys);
 
-	Interior interior = Interior();
+	Interior* interior = new Interior();
 	
-	std::unordered_map<int, int> planehashes,pointhashes;
+	std::unordered_map<int, int>* planehashes = new std::unordered_map<int, int>();
+	std::unordered_map<int, int>* pointhashes = new std::unordered_map<int, int>();
+	std::unordered_map<int, int>* normalhashes = new std::unordered_map<int, int>();
 
 	//printf("Exporting Surfaces\n");
 	//ExportSurfaces(&interior, polys, &planehashes, mMaterials, &pointhashes);
 	printf("Exporting BSP\n");
-	ExportBSP(&interior, *root, &polys, &planehashes,mMaterials,&pointhashes,&orderedpolys);
+	ExportBSP(interior, root, &polys,*planehashes,mMaterials,*pointhashes,orderedpolys, *normalhashes);
 
-	std::vector<std::vector<Polygon>> groupedPolys = std::vector<std::vector<Polygon>>();
+	for (auto& poly : polyList) {
+		if (poly.surfaceIndex == -1)
+			throw new std::exception("Unused poly");
+	}
 
-	int fullpolycount = orderedpolys.size() / 8;
-	int rem = orderedpolys.size() % 8;
+	//orderedpolys->clear();
+	//for (auto& poly : polyList)
+	//{
+	//	orderedpolys->push_back(&poly);
+	//}
 
-	for (int i = 0; i < orderedpolys.size() - rem; i += 8)
+	delete nodeAlloc;
+
+	std::vector<std::vector<Polygon*>> groupedPolys = std::vector<std::vector<Polygon*>>();
+
+	int fullpolycount = polyList.size() / 8;
+	int rem = polyList.size() % 8;
+
+	for (int i = 0; i < polyList.size() - rem; i += 8)
 	{
-		std::vector<Polygon> polysList = std::vector<Polygon>();
+		std::vector<Polygon*> polysList = std::vector<Polygon*>();
 		for (int j = 0; j < 8; j++)
-			polysList.push_back(orderedpolys[i + j]);
+			polysList.push_back(&polyList.at(i + j));
 
 		groupedPolys.push_back(polysList);
 	}
-	std::vector<Polygon> lastPolys = std::vector<Polygon>();
-	for (int i = orderedpolys.size() - rem; i < orderedpolys.size(); i++)
+	std::vector<Polygon*> lastPolys = std::vector<Polygon*>();
+	for (int i = orderedpolys->size() - rem; i < orderedpolys->size(); i++)
 	{
-		lastPolys.push_back(orderedpolys[i]);
+		lastPolys.push_back(orderedpolys->at(i));
 	}
 	if (lastPolys.size() != 0)
 		groupedPolys.push_back(lastPolys);
 
 	printf("Exporting Convex Hulls\n");
 	std::vector<ObjectHash> emitStrHashes;
-	ExportConvexHulls(&interior, groupedPolys, &pointhashes, &planehashes,&emitStrHashes,this->exportEmitStrings);
+	ExportConvexHulls(interior, groupedPolys, *pointhashes, *planehashes,&emitStrHashes, *normalhashes, this->exportEmitStrings);
 
 	printf("Exporting Zones\n");
 	Interior::Zone z = Interior::Zone();
 	z.portalStart = 0;
 	z.portalCount = 0;
 	z.surfaceStart = 0;
-	z.surfaceCount = interior.surface.size();
+	z.surfaceCount = interior->surface.size();
 	z.flags = 0;
 	z.staticMeshStart = 0;
 	z.staticMeshCount = 0;
 
-	interior.zone.push_back(z);
+	interior->zone.push_back(z);
 
-	for (int i = 0; i < interior.surface.size(); i++)
-		interior.zoneSurface.push_back(i);
+	for (int i = 0; i < interior->surface.size(); i++)
+		interior->zoneSurface.push_back(i);
 
-	interior.coordBinMode = 0;
-	interior.baseAmbientColor = glm::cvec4(1, 1, 1, 1);
-	interior.alarmAmbientColor = glm::cvec4(1, 1, 1, 1);
-	interior.detailLevel = 0;
-	interior.lightMapBorderSize = 0;
-	interior.minPixels = 250;
-	interior.hasAlarmState = 0;
-	interior.numLightStateEntries = 0;
-	interior.boundingBox = getBoundingBox();
-	interior.boundingSphere = getBoundingSphere();
+	interior->coordBinMode = 0;
+	interior->baseAmbientColor = glm::cvec4(1, 1, 1, 1);
+	interior->alarmAmbientColor = glm::cvec4(1, 1, 1, 1);
+	interior->detailLevel = 0;
+	interior->lightMapBorderSize = 0;
+	interior->minPixels = 250;
+	interior->hasAlarmState = 0;
+	interior->numLightStateEntries = 0;
+	interior->boundingBox = getBoundingBox();
+	interior->boundingSphere = getBoundingSphere();
 
 	printf("Exporting CoordBins\n");
 
-	ExportCoordBins(&interior);
+	ExportCoordBins(interior);
 
 	printf("Exporting PathedInteriors\n");
 	for (auto& it : mPathedInteriors)
@@ -991,9 +1069,13 @@ void DIFBuilder::build(DIF &dif,bool flipNormals)
 
 	printf("Finalizing\n");
 	//FixPlanes(interior.plane, interior.normal);
-	dif.interior.push_back(interior);
+	dif.interior.push_back(*interior);
 
-
+	delete interior;
+	delete orderedpolys;
+	delete planehashes;
+	delete pointhashes;
+	delete normalhashes;
 }
 
 BoxF DIFBuilder::getBoundingBox() {
@@ -1065,23 +1147,212 @@ std::ostream &operator<<(std::ostream &stream, const glm::mat3x4 &input) {
 	              << std::setw(10) << input[2][0] << " " << std::setw(10) << input[2][1] << " " << std::setw(10) << input[2][2] << " " << std::setw(10) << input[2][3] << std::endl;
 }
 
-Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 &point1, const glm::vec3 &point2,
-								  glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2) {
+//The 3 elementary matrix row operations that you can apply without changing the result
+void swapRows(glm::mat3x4& mat, int rowA, int rowB) {
+	std::swap(mat[rowA], mat[rowB]);
+}
+void scaleRow(glm::mat3x4& mat, int row, float scale) {
+	mat[row] *= scale;
+}
+void addRow(glm::mat3x4& mat, int destRow, int srcRow, float factor) {
+	mat[destRow] += mat[srcRow] * factor;
+}
+
+glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
+#define MaybePrint(a) if (print) { std::cout << a << std::endl; }
+
+	//Clean up stuff that is almost zero
+	MaybePrint(pointMatrix);
+	if (closeEnough(pointMatrix[0][0], 0.f)) pointMatrix[0][0] = 0.f;
+	if (closeEnough(pointMatrix[1][0], 0.f)) pointMatrix[1][0] = 0.f;
+	if (closeEnough(pointMatrix[2][0], 0.f)) pointMatrix[2][0] = 0.f;
+	if (closeEnough(pointMatrix[0][1], 0.f)) pointMatrix[0][1] = 0.f;
+	if (closeEnough(pointMatrix[1][1], 0.f)) pointMatrix[1][1] = 0.f;
+	if (closeEnough(pointMatrix[2][1], 0.f)) pointMatrix[2][1] = 0.f;
+	if (closeEnough(pointMatrix[0][2], 0.f)) pointMatrix[0][2] = 0.f;
+	if (closeEnough(pointMatrix[1][2], 0.f)) pointMatrix[1][2] = 0.f;
+	if (closeEnough(pointMatrix[2][2], 0.f)) pointMatrix[2][2] = 0.f;
+	if (closeEnough(pointMatrix[0][3], 0.f)) pointMatrix[0][3] = 0.f;
+	if (closeEnough(pointMatrix[1][3], 0.f)) pointMatrix[1][3] = 0.f;
+	if (closeEnough(pointMatrix[2][3], 0.f)) pointMatrix[2][3] = 0.f;
+	MaybePrint(pointMatrix);
+
+	//For checking at the end
+	glm::mat3x4 test = pointMatrix;
+
+	glm::vec3 offset = glm::vec3(0, 0, 0);
+	int iteration = 0;
+	while (glm::determinant(glm::mat3x3(pointMatrix)) == 0)
+	{
+		if (iteration > 0)
+			printf("Can't find texgen for this specific surface: iteration %d\n", iteration);
+		offset += glm::vec3(1, 1, 1);
+		pointMatrix[0][0] += offset.x;
+		pointMatrix[0][1] += offset.y;
+		pointMatrix[0][2] += offset.z;
+		pointMatrix[1][0] += offset.x;
+		pointMatrix[1][1] += offset.y;
+		pointMatrix[1][2] += offset.z;
+		pointMatrix[2][0] += offset.x;
+		pointMatrix[2][1] += offset.y;
+		pointMatrix[3][2] += offset.z;
+		iteration++;
+
+		if (iteration >= 10)
+		{
+			printf("skipping texgen");
+		}
+	}
+
+	/*
+	 We have three simultaneous equations:
+	 ax + by + cz = uv0
+	 dx + ey + fz = uv1
+	 gx + hy + iz = uv2
+	 We can arrange them in a matrix like this:
+	 [ a b c ]   ( x )   ( uv0 )
+	 [ d e f ] x ( y ) = ( uv1 )
+	 [ g h i ]   ( z )   ( uv2 )
+
+	 And then if we can get the matrix into reduced echelon form we can solve
+	 for (x y z) with no trouble.
+	 */
+
+	 //Swap around rows so that we can get something non-zero for [0][0]
+	if (closeEnough(pointMatrix[0][0], 0.f)) {
+		if (closeEnough(pointMatrix[1][0], 0.f)) {
+			swapRows(pointMatrix, 0, 2);
+			MaybePrint(pointMatrix);
+		}
+		else {
+			swapRows(pointMatrix, 0, 1);
+			MaybePrint(pointMatrix);
+		}
+	}
+	//If all three have zero for [0][0] then we're fine here
+	if (!closeEnough(pointMatrix[0][0], 0.f)) {
+		/*
+		 Reduce second and third rows so the first column is zero
+		 To get
+		 [ a b c ]
+		 [ 0 d e ]
+		 [ 0 f g ]
+		 */
+		if (!closeEnough(pointMatrix[1][0], 0.f)) {
+			addRow(pointMatrix, 1, 0, -pointMatrix[1][0] / pointMatrix[0][0]);
+			MaybePrint(pointMatrix);
+		}
+		if (!closeEnough(pointMatrix[2][0], 0.f)) {
+			addRow(pointMatrix, 2, 0, -pointMatrix[2][0] / pointMatrix[0][0]);
+			MaybePrint(pointMatrix);
+		}
+	}
+
+	//If mat[1][1] is zero we should swap rows 1 and 2 so we can reduce the other row
+	if (closeEnough(pointMatrix[1][1], 0.f)) {
+		swapRows(pointMatrix, 1, 2);
+		MaybePrint(pointMatrix);
+	}
+	//If mat[1][1] is zero then both [1][1] and [2][1] are zero and we can continue
+	if (!closeEnough(pointMatrix[1][1], 0.f)) {
+		/*
+		 Reverse third row so the second column is zero
+		 To get
+		 [ a b c ]
+		 [ 0 d e ]
+		 [ 0 0 f ]
+		 */
+		if (!closeEnough(pointMatrix[2][1], 0.f)) {
+			addRow(pointMatrix, 2, 1, -pointMatrix[2][1] / pointMatrix[1][1]);
+			MaybePrint(pointMatrix);
+		}
+	}
+
+	/*
+	 Scale each of the rows so the first component is one
+	 To get
+	 [ 1 a b ]
+	 [ 0 1 c ]
+	 [ 0 0 1 ]
+	 */
+	if (!closeEnough(pointMatrix[0][0], 0.f, 0.00001f)) {
+		scaleRow(pointMatrix, 0, 1.0f / pointMatrix[0][0]);
+		MaybePrint(pointMatrix);
+	}
+	if (!closeEnough(pointMatrix[1][1], 0.f, 0.00001f)) {
+		scaleRow(pointMatrix, 1, 1.0f / pointMatrix[1][1]);
+		MaybePrint(pointMatrix);
+	}
+	if (!closeEnough(pointMatrix[2][2], 0.f, 0.00001f)) {
+		scaleRow(pointMatrix, 2, 1.0f / pointMatrix[2][2]);
+		MaybePrint(pointMatrix);
+	}
+
+	/*
+	 At this point the matrix is
+	 [ 1 a b ]   ( x )   ( uv0' )
+	 [ 0 1 c ] x ( y ) = ( uv1' )
+	 [ 0 0 1 ]   ( z )   ( uv2' )
+	 where
+	 x + ay + bz = uv0
+		  y + cz = uv1
+			   z = uv2
+	 therefore
+	 z = uv2'
+	 y = uv1' - cz
+	 x = uv0' - ay - bz
+	 */
+
+	 //Convenience
+	const glm::vec4& xvec = pointMatrix[0];
+	const glm::vec4& yvec = pointMatrix[1];
+	const glm::vec4& zvec = pointMatrix[2];
+
+	//These are easy now
+	float z = zvec[3];
+	float y = yvec[3] - z * yvec[2];
+	float x = xvec[3] - y * xvec[1] - z * xvec[2];
+
+	//Check our work
+//	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2], test[0][3]));
+//	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2], test[1][3]));
+//	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2], test[2][3]));
+
+	//And there we go
+	return glm::vec3(x, y, z);
+}
+
+Interior::TexGenEq getTexGenFromPoints(const glm::vec3& point0, const glm::vec3& point1, const glm::vec3& point2,
+	glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2) {
 	Interior::TexGenEq texGen;
 
-	glm::mat3x3 mat = glm::mat3x3(point0, point1, point2);
-	if (glm::determinant(mat) == 0) // One of our points lies on the coordinate planes, so we push all the points by an offset
-	{
-		glm::vec3 offset = glm::vec3(0.5, 0.5, 0.5);
-		mat = glm::mat3x3(point0 + offset, point1 + offset, point2 + offset);
+	//Construct these matrices for the solver to figure out
+	glm::mat3x4	xTexMat = glm::mat3x4(glm::vec4(point0, uv0.x), glm::vec4(point1, uv1.x), glm::vec4(point2, uv2.x));
+	glm::mat3x4 yTexMat = glm::mat3x4(glm::vec4(point0, uv0.y), glm::vec4(point1, uv1.y), glm::vec4(point2, uv2.y));
+
+	//Solving is rather simple
+	glm::vec3 xsolve = solveMatrix(xTexMat);
+	glm::vec3 ysolve = solveMatrix(yTexMat);
+
+	//Rigorous checking because I don't like being wrong
+	if (!closeEnough(xsolve.x * point0.x + xsolve.y * point0.y + xsolve.z * point0.z, uv0.x, 0.001f)) {
+		solveMatrix(xTexMat, false);
 	}
-	glm::mat3x3 inv = glm::inverse(mat);
-
-	glm::vec3 xuv = glm::vec3(uv0.x, uv1.x, uv2.x);
-	glm::vec3 yuv = glm::vec3(uv0.y, uv1.y, uv2.y);
-
-	glm::vec3 xsolve = xuv * inv;
-	glm::vec3 ysolve = yuv * inv;
+	if (!closeEnough(xsolve.x * point1.x + xsolve.y * point1.y + xsolve.z * point1.z, uv1.x, 0.001f)) {
+		solveMatrix(xTexMat, false);
+	}
+	if (!closeEnough(xsolve.x * point2.x + xsolve.y * point2.y + xsolve.z * point2.z, uv2.x, 0.001f)) {
+		solveMatrix(xTexMat, false);
+	}
+	if (!closeEnough(ysolve.x * point0.x + ysolve.y * point0.y + ysolve.z * point0.z, uv0.y, 0.001f)) {
+		solveMatrix(yTexMat, false);
+	}
+	if (!closeEnough(ysolve.x * point1.x + ysolve.y * point1.y + ysolve.z * point1.z, uv1.y, 0.001f)) {
+		solveMatrix(yTexMat, false);
+	}
+	if (!closeEnough(ysolve.x * point2.x + ysolve.y * point2.y + ysolve.z * point2.z, uv2.y, 0.001f)) {
+		solveMatrix(yTexMat, false);
+	}
 
 	//And there we go
 	texGen.planeX.x = xsolve.x;
