@@ -62,7 +62,7 @@ public:
 	float d = 0;
 };
 
-struct Polygon;
+class Polygon;
 
 struct BSPNode
 {
@@ -91,10 +91,12 @@ struct Vertex
 {
 	glm::vec3 p;
 	glm::vec2 uv;
+	int index = -1;
 };
 
-struct Polygon
+class Polygon
 {
+public:
 	std::vector<Vertex> VertexList;
 	std::vector<int> Indices;
 	glm::vec3 Normal;
@@ -103,6 +105,11 @@ struct Polygon
 	BSPNode* node = NULL;
 	bool IsUsed = false;
 	int surfaceIndex = -1;
+
+	Polygon() {
+
+	}
+	Polygon(const Polygon&) = delete;
 };
 
 std::vector<BSPNode*> BuildBSP(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc);

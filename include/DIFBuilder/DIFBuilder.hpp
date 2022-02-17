@@ -30,6 +30,7 @@
 
 #include <dif/objects/dif.h>
 #include <glm/glm.hpp>
+#include "BSPLib.h"
 
 DIF_NAMESPACE
 
@@ -106,7 +107,7 @@ public:
 
 	void addTriangle(const Triangle &triangle);
 	void addTriangle(const Triangle &triangle, const std::string &material);
-	void addPathedInterior(const Interior& interior, std::vector<Marker> path);
+	void addPathedInterior(const Interior& interior, std::vector<Marker>& path);
 	void addEntity(const GameEntity& entity);
 	void addTrigger(const Trigger& trigger);
 	void build(DIF &dif,bool flipNormals = false);
@@ -123,6 +124,16 @@ protected:
 	SphereF getBoundingSphere();
 	glm::vec3 getAverageNormal(const Triangle &triangle);
 	F32 getPlaneDistance(const Triangle &triangle, const glm::vec3 &center);
+};
+
+class PolygonAllocator {
+	std::vector<Polygon*> nodes;
+
+public:
+	PolygonAllocator();
+	~PolygonAllocator();
+
+	Polygon* allocate();
 };
 
 DIF_NAMESPACE_END
