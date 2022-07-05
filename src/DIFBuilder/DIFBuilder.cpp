@@ -47,6 +47,97 @@ struct HullPoly
 	int planeIndex;
 };
 
+//Because floating point math sucks
+template<typename T>
+bool closeEnough(const T& p1, const T& p2, const F32 distance = 0.0001f) {
+	return glm::distance(p1, p2) < distance;
+}
+
+double roundDoubleAppox(double x)
+{
+	return floor(x * 1e5 + 0.5) / 1e5;
+}
+
+class PlaneMap
+{
+	//wtf
+	std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::unordered_map<uint64_t, short>>>> cells;
+
+public:
+	PlaneMap() = default;
+	~PlaneMap() = default;
+
+	void insert(Plane& p, short index) {
+		double xin = roundDoubleAppox(p.normal.x);
+		double yin = roundDoubleAppox(p.normal.y);
+		double zin = roundDoubleAppox(p.normal.z);
+		double din = roundDoubleAppox(p.d);
+
+		uint64_t x = *(uint64_t*)&xin;
+		uint64_t y = *(uint64_t*)&yin;
+		uint64_t z = *(uint64_t*)&zin;
+		uint64_t d = *(uint64_t*)&din;
+
+		if (this->cells.find(x) != this->cells.end()) {
+			auto& yfind = this->cells[x];
+			if (yfind.find(y) != yfind.end()) {
+				auto& zfind = yfind[y];
+				if (zfind.find(z) != zfind.end()) {
+					auto& dfind = zfind[z];
+					if (dfind.find(d) == dfind.end()) {
+						dfind.insert(std::make_pair(d, index));
+					}
+				} else {
+					std::unordered_map<uint64_t, short> ins;
+					ins.insert(std::make_pair(d, index));
+					zfind.insert(std::make_pair(z, std::move(ins)));
+				}
+			} else {
+				std::unordered_map<uint64_t, std::unordered_map<uint64_t, short>> ins2;
+				std::unordered_map<uint64_t, short> ins;
+				ins.insert(std::make_pair(d, index));
+				ins2.insert(std::make_pair(z, std::move(ins)));
+				yfind.insert(std::make_pair(y, std::move(ins2)));
+			}
+		} else {
+			std::unordered_map<uint64_t, std::unordered_map<uint64_t, std::unordered_map<uint64_t, short>>> ins3;
+			std::unordered_map<uint64_t, std::unordered_map<uint64_t, short>> ins2;
+			std::unordered_map<uint64_t, short> ins;
+			ins.insert(std::make_pair(d, index));
+			ins2.insert(std::make_pair(z, std::move(ins)));
+			ins3.insert(std::make_pair(y, std::move(ins2)));
+			this->cells.insert(std::make_pair(x, std::move(ins3)));
+		}
+	}
+	short* get(Plane& p) {
+		double xin = roundDoubleAppox(p.normal.x);
+		double yin = roundDoubleAppox(p.normal.y);
+		double zin = roundDoubleAppox(p.normal.z);
+		double din = roundDoubleAppox(p.d);
+
+		uint64_t x = *(uint64_t*)&xin;
+		uint64_t y = *(uint64_t*)&yin;
+		uint64_t z = *(uint64_t*)&zin;
+		uint64_t d = *(uint64_t*)&din;
+
+		if (this->cells.find(x) != this->cells.end()) {
+			auto& yfind = this->cells[x];
+			if (yfind.find(y) != yfind.end()) {
+				auto& zfind = yfind[y];
+				if (zfind.find(z) != zfind.end()) {
+					auto& dfind = zfind[z];
+					if (dfind.find(d) != dfind.end()) {
+						return &dfind[d];
+					}
+				}
+			}
+		}
+
+		return NULL;
+
+	}
+};
+
 Interior::TexGenEq getTexGenFromPoints(const glm::vec3 &point0, const glm::vec3 &point1, const glm::vec3 &point2, glm::vec2 uv0, glm::vec2 uv1, glm::vec2 uv2);
 
 PolygonAllocator::PolygonAllocator() = default;
@@ -117,16 +208,28 @@ void DIFBuilder::addTrigger(const Trigger& trigger)
 	mTriggers.push_back(trigger);
 }
 
-//Because floating point math sucks
-template<typename T>
-bool closeEnough(const T& p1, const T& p2, const F32 distance = 0.0001f) {
-	return glm::distance(p1, p2) < distance;
-}
 
-double roundDoubleAppox(double x)
-{
-	return floor(x * 1e5 + 0.5) / 1e5;
-}
+struct plane_hash {
+	std::size_t operator()(Plane const& p) const {
+		double xin = roundDoubleAppox(p.normal.x);
+		double yin = roundDoubleAppox(p.normal.y);
+		double zin = roundDoubleAppox(p.normal.z);
+		double din = roundDoubleAppox(p.d);
+
+		uint64_t x = *(uint64_t*)&xin;
+		uint64_t y = *(uint64_t*)&yin;
+		uint64_t z = *(uint64_t*)&zin;
+		uint64_t d = *(uint64_t*)&din;
+		return std::hash<uint64_t>{}(x) ^ std::hash<uint64_t>{}(y) ^ std::hash<uint64_t>{}(z) ^ std::hash<uint64_t>{}(d);
+	}
+};
+
+struct plane_equal {
+	bool operator()(Plane const& p1, Plane const& p2) const
+	{
+		return closeEnough(p1.normal.x, p2.normal.x, 1e-5) && closeEnough(p1.normal.y, p2.normal.y, 1e-5) && closeEnough(p1.normal.z, p2.normal.z, 1e-5) && closeEnough(p1.d, p1.d, 1e-5);
+	}
+};
 
 uint64_t hashPlane(Plane& pl)
 {
@@ -155,111 +258,28 @@ uint64_t hashPlane(Plane& pl)
 
 //Here come the dif writing functions, algorithm is nearly the same as the ones used in map2dif
 
-short ExportPlane(Interior* interior, Plane& testplane, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>> planeHashCollisions)
+short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices)
 {
-	uint64_t hash = hashPlane(testplane);
 
-	if (planeIndices.find(hash) != planeIndices.end())
+	short* pindex = planeIndices.get(testplane);
+	if (pindex != NULL)
 	{
-		short planeIndex = planeIndices.at(hash);
+		short planeIndex = *pindex;
 		glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
-
-		bool conds1 = closeEnough(testplane.d, interior->plane[planeIndex].planeDistance);
-		bool conds2 = closeEnough(testplane.normal.x, norm.x);
-		bool conds3 = closeEnough(testplane.normal.y, norm.y);
-		bool conds4 = closeEnough(testplane.normal.z, norm.z);
-
-		if (!conds1 && !conds2 && !conds3 && !conds4)
-		{
-			// Maybe this plane is flipped? cause thats how this hash thing works
-			bool innerconds1 = closeEnough(-testplane.d, interior->plane[planeIndex].planeDistance);
-			bool innerconds2 = closeEnough(-testplane.normal.x, norm.x);
-			bool innerconds3 = closeEnough(-testplane.normal.y, norm.y);
-			bool innerconds4 = closeEnough(-testplane.normal.z, norm.z);
-
-			if (innerconds1 && innerconds2 && innerconds3 && innerconds4)
-			{
-				return 0x8000 | planeIndex;
-			}
-
-			// Ok the plane isnt flipped and this is a collision case
-			if (planeHashCollisions.find(hash) != planeHashCollisions.end())
-			{
-				std::vector<short>& v = planeHashCollisions.at(hash);
-
-				for (auto& vindex : v)
-				{
-					glm::vec3& cnorm = interior->normal[interior->plane[vindex].normalIndex];
-
-					bool finalconds1 = closeEnough(testplane.d, interior->plane[vindex].planeDistance);
-					bool finalconds2 = closeEnough(testplane.normal.x, cnorm.x);
-					bool finalconds3 = closeEnough(testplane.normal.y, cnorm.y);
-					bool finalconds4 = closeEnough(testplane.normal.z, cnorm.z);
-
-					if (finalconds1 && finalconds2 && finalconds3 && finalconds4)
-					{
-						// We already had this collision before.
-						return vindex;
-					}
-					else
-					{
-						// Insert the collision entrym and export the plane
-						int index = interior->plane.size();
-
-						if (index >= 32767)
-							throw new std::exception("Out of plane indices");
-
-						Interior::Plane p = Interior::Plane();
-
-						// Now check normal crap
-						int normindex;
-
-						normindex = interior->normal.size();
-						interior->normal.push_back(testplane.normal);
-						interior->normal2.push_back(testplane.normal);
-
-
-						p.normalIndex = normindex;
-						p.planeDistance = testplane.d;
-
-						interior->plane.push_back(p);
-
-						v.push_back(index);
-						planeHashCollisions.insert(std::make_pair(hash, v));
-					}
-				}
-			}
-			else
-			{
-				// Export the plane
-
-				int index = interior->plane.size();
-
-				if (index >= 32767)
-					throw new std::exception("Out of plane indices");
-
-				Interior::Plane p = Interior::Plane();
-
-				// Now check normal crap
-				int normindex;
-
-				normindex = interior->normal.size();
-				interior->normal.push_back(testplane.normal);
-				interior->normal2.push_back(testplane.normal);
-
-
-				p.normalIndex = normindex;
-				p.planeDistance = testplane.d;
-
-				interior->plane.push_back(p);
-
-				std::vector<short> v;
-				v.push_back(index);
-				planeHashCollisions.insert(std::make_pair(hash, v));
-			}
-		}
-
 		return planeIndex;
+	}
+
+	// try flipped
+	Plane flippedplane = testplane;
+	flippedplane.normal *= -1;
+	flippedplane.d *= -1;
+
+	pindex = planeIndices.get(flippedplane);
+	if (pindex != NULL)
+	{
+		short planeIndex = *pindex;
+		glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
+		return planeIndex | 0x8000;
 	}
 
 	int index = interior->plane.size();
@@ -277,19 +297,19 @@ short ExportPlane(Interior* interior, Plane& testplane, std::unordered_map<uint6
 	p.normalIndex = normindex;
 	p.planeDistance = testplane.d;
 
-	interior->plane.push_back(p);
+	planeIndices.insert(testplane, index);
 
-	planeIndices.insert(std::make_pair(hash, index));
+	interior->plane.push_back(p);
 
 	return index;
 
 }
 
-short ExportPlane(Interior *interior, Polygon* poly, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>>& planeHashCollisions)
+short ExportPlane(Interior *interior, Polygon* poly, PlaneMap& planeIndices)
 {
 	Plane testplane = Plane(poly->VertexList[poly->Indices[0]].p, poly->VertexList[poly->Indices[1]].p, poly->VertexList[poly->Indices[2]].p);
 
-	return ExportPlane(interior, testplane, planeIndices, planeHashCollisions);
+	return ExportPlane(interior, testplane, planeIndices);
 }
 
 short ExportTexture(Interior *interior,std::string tex)
@@ -364,14 +384,14 @@ void ExportWinding(Interior *interior, Polygon* poly)
 		interior->index.push_back(finalWinding[i]);
 }
 
-void ExportSurfaces(Interior *interior, std::vector<Polygon*>& polys, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>>& planeHashCollisions ,std::vector<std::string> materialList)
+void ExportSurfaces(Interior *interior, std::vector<Polygon*>& polys, PlaneMap& planeIndices, std::vector<std::string> materialList)
 {
 	for (int i = 0; i < polys.size(); i++)
 	{
 		Polygon* poly = polys[i];
 
 		Interior::Surface rSurface = Interior::Surface();
-		rSurface.planeIndex = ExportPlane(interior, poly, planeIndices, planeHashCollisions);
+		rSurface.planeIndex = ExportPlane(interior, poly, planeIndices);
 		rSurface.textureIndex = ExportTexture(interior, materialList[poly->TextureIndex]);
 		rSurface.texGenIndex = ExportTexGen(interior, poly);
 		rSurface.surfaceFlags = 16;
@@ -393,12 +413,36 @@ void ExportSurfaces(Interior *interior, std::vector<Polygon*>& polys, std::unord
 	}
 }
 
-int ExportSurface(Interior *interior, Polygon* poly, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>>& planeHashCollisions, std::vector<std::string> materialList)
+void assertFloat(float u, float v)
+{
+	if (!closeEnough(u, v, 1e-5)) {
+		printf("FLOATS NOT CLOSE ENOUGH: %f %f", u, v);
+		assert(false);
+	}
+}
+
+int ExportSurface(Interior *interior, Polygon* poly, PlaneMap& planeIndices, std::vector<std::string> materialList)
 {
 	int ret = interior->surface.size();
 	poly->surfaceIndex = ret;
 	Interior::Surface rSurface = Interior::Surface();
-	rSurface.planeIndex = ExportPlane(interior, poly, planeIndices, planeHashCollisions);
+	rSurface.planeIndex = ExportPlane(interior, poly, planeIndices);
+
+	// CHECK POLY NORMALS 
+	bool isPlaneFlipped = (rSurface.planeIndex & 0x8000) > 0;
+	int planeIndex = rSurface.planeIndex & ~0x8000;
+	Interior::Plane p = interior->plane[planeIndex];
+	glm::vec3 n = interior->normal[p.normalIndex];
+
+	if (isPlaneFlipped) {
+		n *= -1;
+		p.planeDistance *= -1;
+	}
+	assertFloat(p.planeDistance, poly->plane.d);
+	assertFloat(n.x, poly->Normal.x);
+	assertFloat(n.y, poly->Normal.y);
+	assertFloat(n.z, poly->Normal.z);
+
 	rSurface.textureIndex = ExportTexture(interior, materialList[poly->TextureIndex]);
 	rSurface.texGenIndex = ExportTexGen(interior, poly);
 	rSurface.surfaceFlags = 16;
@@ -438,7 +482,7 @@ int CreateLeafIndex(int baseIndex, bool isSolid)
 	return baseRet | baseIndex;
 }
 
-int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>>& planeHashCollisions, std::vector<std::string> materialList, std::vector<Polygon*>* orderedpolys)
+int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, PlaneMap& planeIndices, std::vector<std::string> materialList, std::vector<Polygon*>* orderedpolys)
 {
 	if (n->IsLeaf)
 	{
@@ -462,7 +506,7 @@ int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, std:
 		//		leafPolyIndices.push_back(i);
 		//	}
 
-		leafPolyIndices.push_back(ExportSurface(interior, n->poly, planeIndices, planeHashCollisions, materialList));
+		leafPolyIndices.push_back(ExportSurface(interior, n->poly, planeIndices, materialList));
 		orderedpolys->push_back(n->poly);
 
 		for (int i = 0; i < leafPolyIndices.size(); i++)
@@ -476,13 +520,13 @@ int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, std:
 	}
 	else
 	{
-		int frontIndex = n->Front != NULL ? ExportBSP(interior, n->Front, polys, planeIndices, planeHashCollisions, materialList, orderedpolys) : CreateLeafIndex(0, false);
-		int backIndex = n->Back != NULL ? ExportBSP(interior, n->Back, polys, planeIndices, planeHashCollisions, materialList, orderedpolys) : CreateLeafIndex(0, false);
+		int frontIndex = n->Front != NULL ? ExportBSP(interior, n->Front, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
+		int backIndex = n->Back != NULL ? ExportBSP(interior, n->Back, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
 
 		Interior::BSPNode bspnode = Interior::BSPNode();
 		bspnode.frontIndex = frontIndex;
 		bspnode.backIndex = backIndex;
-		bspnode.planeIndex = ExportPlane(interior, n->plane, planeIndices, planeHashCollisions);
+		bspnode.planeIndex = ExportPlane(interior, n->plane, planeIndices);
 		int nodeindex = interior->bspNode.size();
 		interior->bspNode.push_back(bspnode);
 
@@ -535,7 +579,7 @@ int ExportEmitString(Interior* interior,std::vector<U8>& emitstring, std::vector
 	//}
 }
 
-void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> polys, std::unordered_map<uint64_t, short>& planeIndices, std::unordered_map<uint64_t, std::vector<short>>& planeHashCollisions,std::vector<ObjectHash>* emitstrHashes, bool exportEmitStrings = false)
+void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> polys, PlaneMap& planeIndices, std::vector<ObjectHash>* emitstrHashes, bool exportEmitStrings = false)
 {
 	for (int polyIndex = 0; polyIndex < polys.size(); polyIndex++)
 	{
@@ -574,7 +618,7 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 				hp.points.push_back(pt);
 				hullPoints.push_back(pt);
 			}
-			hp.planeIndex = ExportPlane(interior, polys[polyIndex][i], planeIndices, planeHashCollisions);
+			hp.planeIndex = ExportPlane(interior, polys[polyIndex][i], planeIndices);
 			hullpolys.push_back(hp);
 		}
 
@@ -583,7 +627,7 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 
 		for (int i = 0; i < polys[polyIndex].size(); i++)
 		{
-			int planeindex = ExportPlane(interior, polys[polyIndex][i], planeIndices, planeHashCollisions);
+			int planeindex = ExportPlane(interior, polys[polyIndex][i], planeIndices);
 			interior->polyListPlaneIndex.push_back(planeindex);
 			interior->hullPlaneIndex.push_back(planeindex);
 		}
@@ -928,6 +972,311 @@ void ExportTrigger(DIF* dif, DIFBuilder::Trigger& trigger)
 	dif->trigger.push_back(trig);
 }
 
+struct TempProcSurface {
+	U32 numPoints;
+	U32 pointIndices[32];
+	U16 planeIndex;
+	U8  mask;
+};
+
+struct PlaneGrouping {
+	U32 numPlanes;
+	U16 planeIndices[32];
+	U8  mask;
+};
+
+void collisionFanFromSurface(Interior& interior, const Interior::Surface& rSurface, U32* fanIndices, U32* numIndices)
+{
+	U32 tempIndices[32];
+
+	tempIndices[0] = 0;
+	U32 idx = 1;
+	U32 i;
+	for (i = 1; i < rSurface.windingCount; i += 2)
+		tempIndices[idx++] = i;
+	for (i = ((rSurface.windingCount - 1) & (~0x1)); i > 0; i -= 2)
+		tempIndices[idx++] = i;
+
+	idx = 0;
+	for (i = 0; i < rSurface.windingCount; i++) {
+		if (rSurface.fanMask & (1 << i)) {
+			fanIndices[idx++] = interior.index[rSurface.windingStart + tempIndices[i]];
+		}
+	}
+	*numIndices = idx;
+}
+
+void buildHullPolyLists(Interior& interior) 
+{
+	interior.polyListStringCharacter.clear();
+	interior.polyListPointIndex.clear();
+	interior.polyListPlaneIndex.clear();
+
+	std::vector<TempProcSurface> tempSurfaces;
+	std::vector<PlaneGrouping>   planeGroups;
+	std::vector<U16>             planeIndices;
+	std::vector<U32>             pointIndices;
+	std::vector<U8>              pointMasks;
+	std::vector<U8>              planeMasks;
+
+	for (U32 i = 0; i < interior.convexHull.size(); i++) {
+		U32 j, k, l, m;
+
+		Interior::ConvexHull& rHull = interior.convexHull[i];
+
+		planeIndices.clear();
+		pointIndices.clear();
+		tempSurfaces.clear();
+		planeGroups.clear();
+		planeMasks.clear();
+		pointMasks.clear();
+
+		// Extract all the surfaces from this hull into our temporary processing format
+		{
+			for (j = 0; j < rHull.surfaceCount; j++) {
+				TempProcSurface temp;
+
+				U32 surfaceIndex = interior.hullSurfaceIndex[j + rHull.surfaceStart];
+				{
+					const Interior::Surface& rSurface = interior.surface[surfaceIndex];
+
+					temp.planeIndex = rSurface.planeIndex;
+					collisionFanFromSurface(interior, rSurface, temp.pointIndices, &temp.numPoints);
+				}
+
+				tempSurfaces.push_back(temp);
+			}
+		}
+
+		// First order of business: extract all unique planes and points from
+		//  the list of surfaces...
+		{
+			for (j = 0; j < tempSurfaces.size(); j++) {
+				const TempProcSurface& rSurface = tempSurfaces[j];
+
+				bool found = false;
+				for (k = 0; k < planeIndices.size() && !found; k++) {
+					if (rSurface.planeIndex == planeIndices[k])
+						found = true;
+				}
+				if (!found)
+					planeIndices.push_back(rSurface.planeIndex);
+
+				for (k = 0; k < rSurface.numPoints; k++) {
+					found = false;
+					for (l = 0; l < pointIndices.size(); l++) {
+						if (pointIndices[l] == rSurface.pointIndices[k])
+							found = true;
+					}
+					if (!found)
+						pointIndices.push_back(rSurface.pointIndices[k]);
+				}
+			}
+		}
+
+		// Now that we have all the unique points and planes, remap the surfaces in
+		//  terms of the offsets into the unique point list...
+		{
+			for (j = 0; j < tempSurfaces.size(); j++) {
+				TempProcSurface& rSurface = tempSurfaces[j];
+
+				// Points
+				for (k = 0; k < rSurface.numPoints; k++) {
+					bool found = false;
+					for (l = 0; l < pointIndices.size(); l++) {
+						if (pointIndices[l] == rSurface.pointIndices[k]) {
+							rSurface.pointIndices[k] = l;
+							found = true;
+							break;
+						}
+					}
+				}
+			}
+		}
+
+		// Now we group the planes together, and merge the closest groups until we're left
+		//  with <= 8 groups
+		{
+			for (j = 0; j < planeIndices.size(); j++) {
+				PlaneGrouping pg;
+				pg.numPlanes = 1;
+				pg.planeIndices[0] = planeIndices[j];
+				planeGroups.push_back(pg);
+			}
+
+			while (planeGroups.size() > 8) {
+				// Find the two closest groups.  If mdp(i, j) is the value of the
+				//  largest pairwise dot product that can be computed from the vectors
+				//  of group i, and group j, then the closest group pair is the one
+				//  with the smallest value of mdp.
+				F32 currmin = 2;
+				S32 firstGroup = -1;
+				S32 secondGroup = -1;
+
+				for (j = 0; j < planeGroups.size(); j++) {
+					PlaneGrouping& first = planeGroups[j];
+					for (k = j + 1; k < planeGroups.size(); k++) {
+						PlaneGrouping& second = planeGroups[k];
+
+						F32 max = -2;
+						for (l = 0; l < first.numPlanes; l++) {
+							for (m = 0; m < second.numPlanes; m++) {
+								glm::vec3 firstNormal = interior.normal[interior.plane[first.planeIndices[l] & ~0x8000].normalIndex];
+								if ((first.planeIndices[l] >> 15) != 0)
+									firstNormal *= -1;
+								glm::vec3 secondNormal = interior.normal[interior.plane[first.planeIndices[m] & ~0x8000].normalIndex];
+								if ((second.planeIndices[l] >> 15) != 0)
+									secondNormal *= -1;
+
+								F32 dot = glm::dot(firstNormal, secondNormal);
+								if (dot > max)
+									max = dot;
+							}
+						}
+
+						if (max < currmin) {
+							currmin = max;
+							firstGroup = j;
+							secondGroup = k;
+						}
+					}
+				}
+				assert(firstGroup != -1 && secondGroup != -1, "Error, unable to find a suitable pairing?");
+
+				// Merge first and second
+				PlaneGrouping& to = planeGroups[firstGroup];
+				PlaneGrouping& from = planeGroups[secondGroup];
+				while (from.numPlanes != 0) {
+					to.planeIndices[to.numPlanes++] = from.planeIndices[from.numPlanes - 1];
+					from.numPlanes--;
+				}
+
+				// And remove the merged group
+				planeGroups.erase(planeGroups.begin() + secondGroup);
+			}
+			assert(planeGroups.size() <= 8, "Error, too many plane groupings!");
+
+
+			// Assign a mask to each of the plane groupings
+			for (j = 0; j < planeGroups.size(); j++)
+				planeGroups[j].mask = (1 << j);
+		}
+
+		// Now, assign the mask to each of the temp polys
+		{
+			for (j = 0; j < tempSurfaces.size(); j++) {
+				bool assigned = false;
+				for (k = 0; k < planeGroups.size() && !assigned; k++) {
+					for (l = 0; l < planeGroups[k].numPlanes; l++) {
+						if (planeGroups[k].planeIndices[l] == tempSurfaces[j].planeIndex) {
+							tempSurfaces[j].mask = planeGroups[k].mask;
+							assigned = true;
+							break;
+						}
+					}
+				}
+				assert(assigned, "Error, missed a plane somewhere in the hull poly list!");
+			}
+		}
+
+		// Copy the appropriate group mask to the plane masks
+		{
+
+			for (j = 0; j < planeIndices.size(); j++) {
+				bool found = false;
+				for (k = 0; k < planeGroups.size() && !found; k++) {
+					for (l = 0; l < planeGroups[k].numPlanes; l++) {
+						if (planeGroups[k].planeIndices[l] == planeIndices[j]) {
+							planeMasks.push_back(planeGroups[k].mask);
+							found = true;
+							break;
+						}
+					}
+				}
+				assert(planeMasks[j] != 0, "Error, missing mask for plane!");
+			}
+		}
+
+		// And whip through the points, constructing the total mask for that point
+		{
+
+			for (j = 0; j < pointIndices.size(); j++) {
+				pointMasks.push_back(0);
+				for (k = 0; k < tempSurfaces.size(); k++) {
+					for (l = 0; l < tempSurfaces[k].numPoints; l++) {
+						if (tempSurfaces[k].pointIndices[l] == j) {
+							pointMasks[j] |= tempSurfaces[k].mask;
+							break;
+						}
+					}
+				}
+				assert(pointMasks[j] != 0, "Error, point must exist in at least one surface!");
+			}
+		}
+
+		// Create the emit strings, and we're done!
+		{
+			// Set the range of planes
+			rHull.polyListPlaneStart = interior.polyListPlaneIndex.size();
+			for (j = 0; j < planeIndices.size(); j++)
+				interior.polyListPlaneIndex.push_back(planeIndices[j]);
+
+			// Set the range of points
+			rHull.polyListPointStart = interior.polyListPointIndex.size();
+			for (j = 0; j < pointIndices.size(); j++)
+				interior.polyListPointIndex.push_back(pointIndices[j]);
+
+			// Now the emit string.  The emit string goes like: (all fields are bytes)
+			//  NumPlanes (PLMask) * NumPlanes
+			//  NumPointsHi NumPointsLo (PtMask) * NumPoints
+			//  NumSurfaces
+			//   (NumPoints SurfaceMask PlOffset (PtOffsetHi PtOffsetLo) * NumPoints) * NumSurfaces
+			//
+			U32 stringLen = 1 + planeIndices.size();
+			stringLen += 2 + pointIndices.size();
+			stringLen += 1;
+			for (j = 0; j < tempSurfaces.size(); j++)
+				stringLen += 1 + 1 + 1 + (tempSurfaces[j].numPoints * 2);
+
+			rHull.polyListStringStart = interior.polyListStringCharacter.size();
+
+			// Planes
+			interior.polyListStringCharacter.push_back(planeIndices.size());
+			for (j = 0; j < planeIndices.size(); j++)
+				interior.polyListStringCharacter.push_back(planeMasks[j]);
+
+			// Points
+			interior.polyListStringCharacter.push_back((pointIndices.size() >> 8) & 0xFF);
+			interior.polyListStringCharacter.push_back((pointIndices.size() >> 0) & 0xFF);
+			for (j = 0; j < pointIndices.size(); j++)
+				interior.polyListStringCharacter.push_back(pointMasks[j]);
+
+			// Surfaces
+			interior.polyListStringCharacter.push_back(tempSurfaces.size());
+			for (j = 0; j < tempSurfaces.size(); j++) {
+				interior.polyListStringCharacter.push_back(tempSurfaces[j].numPoints);
+				interior.polyListStringCharacter.push_back(tempSurfaces[j].mask);
+
+				bool found = false;
+				for (k = 0; k < planeIndices.size(); k++) {
+					if (planeIndices[k] == tempSurfaces[j].planeIndex) {
+						interior.polyListStringCharacter.push_back(k);
+						found = true;
+						break;
+					}
+				}
+				assert(found, "Error, missing planeindex!");
+
+				for (k = 0; k < tempSurfaces[j].numPoints; k++) {
+					interior.polyListStringCharacter.push_back((tempSurfaces[j].pointIndices[k] >> 8) & 0xFF);
+					interior.polyListStringCharacter.push_back((tempSurfaces[j].pointIndices[k] >> 0) & 0xFF);
+				}
+			}
+		}
+	} // for (i = 0; i < mConvexHulls.size(); i++)
+
+}
+
 void DIFBuilder::build(DIF& dif, bool flipNormals)
 {
 
@@ -970,12 +1319,13 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 		}
 		if (!flipNormals)
 		{
-			//poly.plane = Plane(mTriangles[i].points[0].vertex, mTriangles[i].points->normal);
+			// poly->plane = Plane(mTriangles[i].points[0].vertex, mTriangles[i].points[0].normal);
 			poly->plane = Plane(mTriangles[i].points[0].vertex, mTriangles[i].points[1].vertex, mTriangles[i].points[2].vertex);
 			poly->Normal = poly->plane.normal;
 		}
 		else
 		{
+			// poly->plane = Plane(mTriangles[i].points[0].vertex, mTriangles[i].points[0].normal);
 			poly->plane = Plane(mTriangles[i].points[2].vertex, mTriangles[i].points[1].vertex, mTriangles[i].points[0].vertex);
 			poly->Normal = poly->plane.normal;
 		}
@@ -1015,13 +1365,12 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 
 	Interior interior = Interior();
 
-	std::unordered_map<uint64_t, short> planeIndices;
-	std::unordered_map<uint64_t, std::vector<short>> planeHashCollisions;
+	PlaneMap planeIndices;
 
 	//printf("Exporting Surfaces\n");
 	//ExportSurfaces(&interior, polys, &planehashes, mMaterials, &pointhashes);
 	printf("Exporting BSP\n");
-	ExportBSP(&interior, root, &polys, planeIndices, planeHashCollisions, mMaterials, &orderedpolys);
+	ExportBSP(&interior, root, &polys, planeIndices, mMaterials, &orderedpolys);
 
 	for (auto& poly : polyList) {
 		if (poly->surfaceIndex == -1)
@@ -1057,7 +1406,10 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 
 	printf("Exporting Convex Hulls\n");
 	std::vector<ObjectHash> emitStrHashes;
-	ExportConvexHulls(&interior, groupedPolys, planeIndices, planeHashCollisions, &emitStrHashes, this->exportEmitStrings);
+	ExportConvexHulls(&interior, groupedPolys, planeIndices, &emitStrHashes, this->exportEmitStrings);
+
+	printf("Exporting Convex Hull PolyLists\n");
+	buildHullPolyLists(interior);
 
 	printf("Exporting Zones\n");
 	Interior::Zone z = Interior::Zone();
