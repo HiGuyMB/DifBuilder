@@ -105,6 +105,9 @@ public:
 	BSPNode* node = NULL;
 	bool IsUsed = false;
 	int surfaceIndex = -1;
+	std::vector<int> finalWindings;
+	int planeIndex;
+	bool planeExported = false;
 
 	Polygon() {
 

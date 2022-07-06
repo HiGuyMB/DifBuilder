@@ -208,54 +208,6 @@ void DIFBuilder::addTrigger(const Trigger& trigger)
 	mTriggers.push_back(trigger);
 }
 
-
-struct plane_hash {
-	std::size_t operator()(Plane const& p) const {
-		double xin = roundDoubleAppox(p.normal.x);
-		double yin = roundDoubleAppox(p.normal.y);
-		double zin = roundDoubleAppox(p.normal.z);
-		double din = roundDoubleAppox(p.d);
-
-		uint64_t x = *(uint64_t*)&xin;
-		uint64_t y = *(uint64_t*)&yin;
-		uint64_t z = *(uint64_t*)&zin;
-		uint64_t d = *(uint64_t*)&din;
-		return std::hash<uint64_t>{}(x) ^ std::hash<uint64_t>{}(y) ^ std::hash<uint64_t>{}(z) ^ std::hash<uint64_t>{}(d);
-	}
-};
-
-struct plane_equal {
-	bool operator()(Plane const& p1, Plane const& p2) const
-	{
-		return closeEnough(p1.normal.x, p2.normal.x, 1e-5) && closeEnough(p1.normal.y, p2.normal.y, 1e-5) && closeEnough(p1.normal.z, p2.normal.z, 1e-5) && closeEnough(p1.d, p1.d, 1e-5);
-	}
-};
-
-uint64_t hashPlane(Plane& pl)
-{
-	double xin = roundDoubleAppox(pl.normal.x);
-	double yin = roundDoubleAppox(pl.normal.y);
-	double zin = roundDoubleAppox(pl.normal.z);
-	double din = roundDoubleAppox(pl.d);
-
-	uint64_t x = *(uint64_t*)&xin;
-	uint64_t y = *(uint64_t*)&yin;
-	uint64_t z = *(uint64_t*)&zin;
-	uint64_t d = *(uint64_t*)&din;
-
-	uint64_t hash = 14695981039346656037;
-	hash ^= x;
-	hash *= 1099511628211;
-	hash ^= y;
-	hash *= 1099511628211;
-	hash ^= z;
-	hash *= 1099511628211;
-	hash ^= d;
-	hash *= 1099511628211;
-
-	return hash;
-}
-
 //Here come the dif writing functions, algorithm is nearly the same as the ones used in map2dif
 
 short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices)
@@ -307,9 +259,16 @@ short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices)
 
 short ExportPlane(Interior *interior, Polygon* poly, PlaneMap& planeIndices)
 {
+	if (poly->planeExported)
+		return poly->planeIndex;
+
 	Plane testplane = Plane(poly->VertexList[poly->Indices[0]].p, poly->VertexList[poly->Indices[1]].p, poly->VertexList[poly->Indices[2]].p);
 
-	return ExportPlane(interior, testplane, planeIndices);
+	short idx = ExportPlane(interior, testplane, planeIndices);
+	poly->planeIndex = idx;
+	poly->planeExported = true;
+
+	return idx;
 }
 
 short ExportTexture(Interior *interior,std::string tex)
@@ -373,15 +332,18 @@ void ExportWinding(Interior *interior, Polygon* poly)
 		Vertex& p = poly->VertexList[poly->Indices[i]];
 		finalWinding.push_back(ExportPoint(interior, p));
 	}
+
+	poly->finalWindings = std::move(finalWinding);
+
 	Interior::WindingIndex a = Interior::WindingIndex();
 	a.windingStart = interior->index.size();
-	a.windingCount = finalWinding.size();
+	a.windingCount = poly->finalWindings.size();
 
 
 	interior->windingIndex.push_back(a);
 
-	for (int i = 0; i < finalWinding.size(); i++)
-		interior->index.push_back(finalWinding[i]);
+	for (int i = 0; i < poly->finalWindings.size(); i++)
+		interior->index.push_back(poly->finalWindings[i]);
 }
 
 void ExportSurfaces(Interior *interior, std::vector<Polygon*>& polys, PlaneMap& planeIndices, std::vector<std::string> materialList)
@@ -610,14 +572,15 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 		{
 			HullPoly hp = HullPoly();
 			hp.points = std::vector<int>();
-			for (int j = 0; j < polys[polyIndex][i]->Indices.size(); j++)
-			{
-				int pt = ExportPoint(interior, polys[polyIndex][i]->VertexList[polys[polyIndex][i]->Indices[j]]);
+			assert(polys[polyIndex][i]->finalWindings.size() != 0);
+
+			for (auto& pt : polys[polyIndex][i]->finalWindings) {
 				interior->hullIndex.push_back(pt);
 				interior->polyListPointIndex.push_back(pt);
 				hp.points.push_back(pt);
 				hullPoints.push_back(pt);
 			}
+
 			hp.planeIndex = ExportPlane(interior, polys[polyIndex][i], planeIndices);
 			hullpolys.push_back(hp);
 		}
