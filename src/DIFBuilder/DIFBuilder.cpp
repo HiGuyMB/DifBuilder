@@ -337,17 +337,17 @@ void ExportWinding(Interior *interior, Polygon* poly)
 		finalWinding.push_back(ExportPoint(interior, p));
 	}
 
-	poly->finalWindings = std::move(finalWinding);
+	poly->finalWindings = finalWinding;
 
 	Interior::WindingIndex a = Interior::WindingIndex();
 	a.windingStart = interior->index.size();
-	a.windingCount = poly->finalWindings.size();
+	a.windingCount = finalWinding.size();
 
 
 	interior->windingIndex.push_back(a);
 
-	for (int i = 0; i < poly->finalWindings.size(); i++)
-		interior->index.push_back(poly->finalWindings[i]);
+	for (int i = 0; i < finalWinding.size(); i++)
+		interior->index.push_back(finalWinding[i]);
 }
 
 void ExportSurfaces(Interior *interior, std::vector<Polygon*>& polys, PlaneMap& planeIndices, std::vector<std::string> materialList)
@@ -582,7 +582,9 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 			hp.points = std::vector<int>();
 			assert(polys[polyIndex][i]->finalWindings.size() != 0);
 
-			for (auto& pt : polys[polyIndex][i]->finalWindings) {
+			for (int j = 0; j < polys[polyIndex][i]->Indices.size(); j++)
+			{
+				int pt = ExportPoint(interior, polys[polyIndex][i]->VertexList[polys[polyIndex][i]->Indices[j]]);
 				interior->hullIndex.push_back(pt);
 				interior->polyListPointIndex.push_back(pt);
 				hp.points.push_back(pt);
