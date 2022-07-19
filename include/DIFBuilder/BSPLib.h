@@ -52,7 +52,7 @@ public:
 		pt = point;
 	}
 
-	float DistanceToPoint(glm::vec3 point)
+	float DistanceToPoint(glm::vec3& point)
 	{
 		return (glm::dot(this->normal, point)) + this->d;
 	}
@@ -64,15 +64,20 @@ public:
 
 class Polygon;
 
+class BSPNodeAllocator;
+
 struct BSPNode
 {
+	BSPNodeAllocator* alloc;
+
 	bool IsLeaf = false;
 	Plane plane;
 	BSPNode* Front = NULL;
 	BSPNode* Back = NULL;
-	Polygon* poly = NULL;
-	bool hasCenter = false;
-	glm::vec3 center;
+	std::vector<Polygon*> polygons;
+
+public:
+	bool subdivide();
 };
 
 class BSPNodeAllocator
@@ -113,6 +118,22 @@ public:
 
 	}
 	Polygon(const Polygon&) = delete;
+
+	int classify(Plane& splitting) {
+		float firstDot = splitting.DistanceToPoint(VertexList[0].p);
+		int cl = firstDot >= 0 ? 1 : -1;
+
+		for (int i = 1; i < VertexList.size(); i++) {
+			float nextDot = splitting.DistanceToPoint(VertexList[i].p);
+			int nextCl = nextDot >= 0 ? 1 : -1;
+
+			if (cl != nextCl) {
+				return 0;
+			}
+		}
+
+		return cl;
+	}
 };
 
 std::vector<BSPNode*> BuildBSP(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc);
@@ -123,4 +144,4 @@ BSPNode* BuildBSPRecurse(std::vector<BSPNode*> Nodes, BSPNodeAllocator& alloc);
 
 //bool Get_Intersect(glm::vec3 *linestart, glm::vec3 *lineend, glm::vec3 *vertex, glm::vec3 *normal, glm::vec3 & intersection, float &percentage);
 //void DeletePolygon(POLYGON *Poly);
-void GatherBrushes(BSPNode* node, std::vector<Polygon*>* list);
+//void GatherBrushes(BSPNode* node, std::vector<Polygon*>* list);

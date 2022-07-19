@@ -210,28 +210,30 @@ void DIFBuilder::addTrigger(const Trigger& trigger)
 
 //Here come the dif writing functions, algorithm is nearly the same as the ones used in map2dif
 
-short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices)
+short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices, bool usePlanemap = true)
 {
 
-	short* pindex = planeIndices.get(testplane);
-	if (pindex != NULL)
-	{
-		short planeIndex = *pindex;
-		glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
-		return planeIndex;
-	}
+	if (usePlanemap) {
+		short* pindex = planeIndices.get(testplane);
+		if (pindex != NULL)
+		{
+			short planeIndex = *pindex;
+			glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
+			return planeIndex;
+		}
 
-	// try flipped
-	Plane flippedplane = testplane;
-	flippedplane.normal *= -1;
-	flippedplane.d *= -1;
+		// try flipped
+		Plane flippedplane = testplane;
+		flippedplane.normal *= -1;
+		flippedplane.d *= -1;
 
-	pindex = planeIndices.get(flippedplane);
-	if (pindex != NULL)
-	{
-		short planeIndex = *pindex;
-		glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
-		return planeIndex | 0x8000;
+		pindex = planeIndices.get(flippedplane);
+		if (pindex != NULL)
+		{
+			short planeIndex = *pindex;
+			glm::vec3& norm = interior->normal[interior->plane[planeIndex].normalIndex];
+			return planeIndex | 0x8000;
+		}
 	}
 
 	int index = interior->plane.size();
@@ -249,7 +251,9 @@ short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices)
 	p.normalIndex = normindex;
 	p.planeDistance = testplane.d;
 
-	planeIndices.insert(testplane, index);
+	if (usePlanemap) {
+		planeIndices.insert(testplane, index);
+	}
 
 	interior->plane.push_back(p);
 
@@ -385,6 +389,10 @@ void assertFloat(float u, float v)
 
 int ExportSurface(Interior *interior, Polygon* poly, PlaneMap& planeIndices, std::vector<std::string> materialList)
 {
+	if (poly->surfaceIndex != -1) {
+		return poly->surfaceIndex;
+	}
+
 	int ret = interior->surface.size();
 	poly->surfaceIndex = ret;
 	Interior::Surface rSurface = Interior::Surface();
@@ -453,7 +461,7 @@ int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, Plan
 
 		Interior::BSPSolidLeaf leaf = Interior::BSPSolidLeaf();
 		leaf.surfaceIndex = interior->solidLeafSurface.size();
-		leaf.surfaceCount = 0;
+		leaf.surfaceCount = n->polygons.size();
 
 		std::vector<int> leafPolyIndices = std::vector<int>();
 
@@ -468,29 +476,29 @@ int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, Plan
 		//		leafPolyIndices.push_back(i);
 		//	}
 
-		leafPolyIndices.push_back(ExportSurface(interior, n->poly, planeIndices, materialList));
-		orderedpolys->push_back(n->poly);
-
-		for (int i = 0; i < leafPolyIndices.size(); i++)
+		for (auto& poly : n->polygons)
 		{
-			interior->solidLeafSurface.push_back(leafPolyIndices[i]);
-			leaf.surfaceCount++;
+			int polyIndex = ExportSurface(interior, poly, planeIndices, materialList);
+			interior->solidLeafSurface.push_back(polyIndex);
+			orderedpolys->push_back(poly);
 		}
+
 
 		interior->bspSolidLeaf.push_back(leaf);
 		return CreateLeafIndex(leafindex, true);
 	}
 	else
 	{
+		Interior::BSPNode bspnode = Interior::BSPNode();
+		int nodeindex = interior->bspNode.size();
+		interior->bspNode.push_back(bspnode);
+
 		int frontIndex = n->Front != NULL ? ExportBSP(interior, n->Front, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
 		int backIndex = n->Back != NULL ? ExportBSP(interior, n->Back, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
 
-		Interior::BSPNode bspnode = Interior::BSPNode();
-		bspnode.frontIndex = frontIndex;
-		bspnode.backIndex = backIndex;
-		bspnode.planeIndex = ExportPlane(interior, n->plane, planeIndices);
-		int nodeindex = interior->bspNode.size();
-		interior->bspNode.push_back(bspnode);
+		interior->bspNode[nodeindex].frontIndex = frontIndex;
+		interior->bspNode[nodeindex].backIndex = backIndex;
+		interior->bspNode[nodeindex].planeIndex = ExportPlane(interior, n->plane, planeIndices, false);
 
 		return nodeindex;
 	}
@@ -1299,19 +1307,17 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 
 	BSPNodeAllocator nodeAlloc;
 
-	std::vector<BSPNode*> nodes;
+	BSPNode* rootNode = nodeAlloc.allocate();
+	rootNode->IsLeaf = true;
+
 	for (auto& poly : polyList)
 	{
-		BSPNode* n = nodeAlloc.allocate();
-		BSPNode* leafnode = nodeAlloc.allocate();
-		leafnode->IsLeaf = true;
-		leafnode->poly = poly;
-		n->Front = leafnode;
-		n->plane = Plane(poly->VertexList[0].p, poly->Normal);
-		nodes.push_back(n);
+		rootNode->polygons.push_back(poly);
 	}
 
-	BSPNode* root = BuildBSPRecurse(nodes, nodeAlloc);
+	rootNode->subdivide(); // build BSP
+
+	// BSPNode* root = BuildBSPRecurse(nodes, nodeAlloc);
 
 	//for (auto& poly : polyList)
 	//{
@@ -1333,7 +1339,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//printf("Exporting Surfaces\n");
 	//ExportSurfaces(&interior, polys, &planehashes, mMaterials, &pointhashes);
 	printf("Exporting BSP\n");
-	ExportBSP(&interior, root, &polys, planeIndices, mMaterials, &orderedpolys);
+	ExportBSP(&interior, rootNode, &polys, planeIndices, mMaterials, &orderedpolys);
 
 	for (auto& poly : polyList) {
 		if (poly->surfaceIndex == -1)
@@ -1552,29 +1558,29 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 	//For checking at the end
 	glm::mat3x4 test = pointMatrix;
 
-	glm::vec3 offset = glm::vec3(0, 0, 0);
-	int iteration = 0;
-	while (glm::determinant(glm::mat3x3(pointMatrix)) == 0)
-	{
-		if (iteration > 0)
-			printf("Can't find texgen for this specific surface: iteration %d\n", iteration);
-		offset += glm::vec3(1, 1, 1);
-		pointMatrix[0][0] += offset.x;
-		pointMatrix[0][1] += offset.y;
-		pointMatrix[0][2] += offset.z;
-		pointMatrix[1][0] += offset.x;
-		pointMatrix[1][1] += offset.y;
-		pointMatrix[1][2] += offset.z;
-		pointMatrix[2][0] += offset.x;
-		pointMatrix[2][1] += offset.y;
-		pointMatrix[2][2] += offset.z;
-		iteration++;
+	//glm::vec3 offset = glm::vec3(0, 0, 0);
+	//int iteration = 0;
+	//while (glm::determinant(glm::mat3x3(pointMatrix)) == 0)
+	//{
+	//	if (iteration > 0)
+	//		printf("Can't find texgen for this specific surface: iteration %d\n", iteration);
+	//	offset += glm::vec3(1, 1, 1);
+	//	pointMatrix[0][0] += offset.x;
+	//	pointMatrix[0][1] += offset.y;
+	//	pointMatrix[0][2] += offset.z;
+	//	pointMatrix[1][0] += offset.x;
+	//	pointMatrix[1][1] += offset.y;
+	//	pointMatrix[1][2] += offset.z;
+	//	pointMatrix[2][0] += offset.x;
+	//	pointMatrix[2][1] += offset.y;
+	//	pointMatrix[2][2] += offset.z;
+	//	iteration++;
 
-		if (iteration >= 10)
-		{
-			printf("skipping texgen");
-		}
-	}
+	//	if (iteration >= 10)
+	//	{
+	//		printf("skipping texgen");
+	//	}
+	//}
 
 	/*
 	 We have three simultaneous equations:
