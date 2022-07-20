@@ -32,7 +32,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <sstream>
-
+#include <glm/detail/type_mat.hpp>
 DIF_NAMESPACE
 
 struct ObjectHash
@@ -1521,24 +1521,114 @@ F32 DIFBuilder::getPlaneDistance(const Triangle &triangle, const glm::vec3 &cent
 	return glm::dot(-averagePoint, normal);
 }
 
-std::ostream &operator<<(std::ostream &stream, const glm::mat3x4 &input) {
+struct Vec5 {
+public:
+	float m[5];
+
+	Vec5() {
+		for (int i = 0; i < 5; i++) {
+			this->m[i] = 0;
+		}
+	}
+
+	Vec5(float m1, float m2, float m3, float m4, float m5) {
+		this->m[0] = m1;
+		this->m[1] = m2;
+		this->m[2] = m3;
+		this->m[3] = m4;
+		this->m[4] = m5;
+	}
+
+	float& operator[](int index) {
+		return m[index];
+	}
+
+	float operator[](int index) const {
+		return m[index];
+	}
+
+	Vec5 operator*(float scale) {
+		Vec5 ret = *this;
+		for (int i = 0; i < 5; i++) {
+			ret.m[i] *= scale;
+		}
+		return ret;
+	}
+
+	void operator*=(float scale) {
+		for (int i = 0; i < 5; i++) {
+			this->m[i] *= scale;
+		}
+	}
+
+	Vec5 operator+(float scale) {
+		Vec5 ret = *this;
+		for (int i = 0; i < 5; i++) {
+			ret.m[i] += scale;
+		}
+		return ret;
+	}
+
+	void operator+=(Vec5&& v) {
+		for (int i = 0; i < 5; i++) {
+			this->m[i] += v.m[i];
+		}
+	}
+};
+
+struct Mat3x5 {
+public:
+	Vec5 rows[3];
+
+	Mat3x5() {
+		
+	}
+
+	Mat3x5(Vec5 r1, Vec5 r2, Vec5 r3) {
+		this->rows[0] = r1;
+		this->rows[1] = r2;
+		this->rows[2] = r3;
+	}
+
+	Vec5& operator[](int index) {
+		return this->rows[index];
+	}
+
+	Vec5 operator[](int index) const {
+		return this->rows[index];
+	}
+
+	void swapRows(int i1, int i2) {
+		std::swap(this->rows[i1], this->rows[i2]);
+	}
+
+	void scaleRow(int row, float scale) {
+		this->rows[row] *= scale;
+	}
+	
+	void addRow(int dest, int src, float factor) {
+		this->rows[dest] += this->rows[src] * factor;
+	}
+};
+
+std::ostream &operator<<(std::ostream &stream, const Mat3x5& input) {
 	return stream << std::setw(10) << input[0][0] << " " << std::setw(10) << input[0][1] << " " << std::setw(10) << input[0][2] << " " << std::setw(10) << input[0][3] << std::endl
 	              << std::setw(10) << input[1][0] << " " << std::setw(10) << input[1][1] << " " << std::setw(10) << input[1][2] << " " << std::setw(10) << input[1][3] << std::endl
 	              << std::setw(10) << input[2][0] << " " << std::setw(10) << input[2][1] << " " << std::setw(10) << input[2][2] << " " << std::setw(10) << input[2][3] << std::endl;
 }
 
 //The 3 elementary matrix row operations that you can apply without changing the result
-void swapRows(glm::mat3x4& mat, int rowA, int rowB) {
-	std::swap(mat[rowA], mat[rowB]);
-}
-void scaleRow(glm::mat3x4& mat, int row, float scale) {
-	mat[row] *= scale;
-}
-void addRow(glm::mat3x4& mat, int destRow, int srcRow, float factor) {
-	mat[destRow] += mat[srcRow] * factor;
-}
+//void swapRows(glm::mat3x4& mat, int rowA, int rowB) {
+//	std::swap(mat[rowA], mat[rowB]);
+//}
+//void scaleRow(glm::mat3x4& mat, int row, float scale) {
+//	mat[row] *= scale;
+//}
+//void addRow(glm::mat3x4& mat, int destRow, int srcRow, float factor) {
+//	mat[destRow] += mat[srcRow] * factor;
+//}
 
-glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
+glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 #define MaybePrint(a) if (print) { std::cout << a << std::endl; }
 
 	//Clean up stuff that is almost zero
@@ -1558,7 +1648,14 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 	MaybePrint(pointMatrix);
 
 	//For checking at the end
-	glm::mat3x4 test = pointMatrix;
+	Mat3x5 test = pointMatrix;
+
+	//if (glm::determinant(glm::mat3x3(pointMatrix)) == 0)
+	//{
+	//	printf("Gae");
+	//}
+
+	// TODO solve 4 var 3 unknown equation - inf solution
 
 	//glm::vec3 offset = glm::vec3(0, 0, 0);
 	//int iteration = 0;
@@ -1586,26 +1683,27 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 
 	/*
 	 We have three simultaneous equations:
-	 ax + by + cz = uv0
-	 dx + ey + fz = uv1
-	 gx + hy + iz = uv2
+	 ax + by + cz + d = uv0
+	 dx + ey + fz + d= uv1
+	 gx + hy + iz + d= uv2
 	 We can arrange them in a matrix like this:
-	 [ a b c ]   ( x )   ( uv0 )
-	 [ d e f ] x ( y ) = ( uv1 )
-	 [ g h i ]   ( z )   ( uv2 )
+	 [ a b c 1 ]   ( x )   ( uv0 )
+	 [ d e f 1 ] x ( y ) = ( uv1 )
+	 [ g h i 1 ]   ( z )   ( uv2 )
+	               ( d )
 
 	 And then if we can get the matrix into reduced echelon form we can solve
-	 for (x y z) with no trouble.
+	 for (x y z d) with no trouble.
 	 */
 
 	 //Swap around rows so that we can get something non-zero for [0][0]
 	if (closeEnough(pointMatrix[0][0], 0.f)) {
 		if (closeEnough(pointMatrix[1][0], 0.f)) {
-			swapRows(pointMatrix, 0, 2);
+			pointMatrix.swapRows(0, 2);
 			MaybePrint(pointMatrix);
 		}
 		else {
-			swapRows(pointMatrix, 0, 1);
+			pointMatrix.swapRows(0, 1);
 			MaybePrint(pointMatrix);
 		}
 	}
@@ -1614,23 +1712,23 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 		/*
 		 Reduce second and third rows so the first column is zero
 		 To get
-		 [ a b c ]
-		 [ 0 d e ]
-		 [ 0 f g ]
+		 [ a b c p ]
+		 [ 0 d e q ]
+		 [ 0 f g r ]
 		 */
 		if (!closeEnough(pointMatrix[1][0], 0.f)) {
-			addRow(pointMatrix, 1, 0, -pointMatrix[1][0] / pointMatrix[0][0]);
+			pointMatrix.addRow(1, 0, -pointMatrix[1][0] / pointMatrix[0][0]);
 			MaybePrint(pointMatrix);
 		}
 		if (!closeEnough(pointMatrix[2][0], 0.f)) {
-			addRow(pointMatrix, 2, 0, -pointMatrix[2][0] / pointMatrix[0][0]);
+			pointMatrix.addRow(2, 0, -pointMatrix[2][0] / pointMatrix[0][0]);
 			MaybePrint(pointMatrix);
 		}
 	}
 
 	//If mat[1][1] is zero we should swap rows 1 and 2 so we can reduce the other row
 	if (closeEnough(pointMatrix[1][1], 0.f)) {
-		swapRows(pointMatrix, 1, 2);
+		pointMatrix.swapRows(1, 2);
 		MaybePrint(pointMatrix);
 	}
 	//If mat[1][1] is zero then both [1][1] and [2][1] are zero and we can continue
@@ -1638,12 +1736,12 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 		/*
 		 Reverse third row so the second column is zero
 		 To get
-		 [ a b c ]
-		 [ 0 d e ]
-		 [ 0 0 f ]
+		 [ a b c p ]
+		 [ 0 d e q ]
+		 [ 0 0 f r ]
 		 */
 		if (!closeEnough(pointMatrix[2][1], 0.f)) {
-			addRow(pointMatrix, 2, 1, -pointMatrix[2][1] / pointMatrix[1][1]);
+			pointMatrix.addRow(2, 1, -pointMatrix[2][1] / pointMatrix[1][1]);
 			MaybePrint(pointMatrix);
 		}
 	}
@@ -1651,55 +1749,404 @@ glm::vec3 solveMatrix(glm::mat3x4 pointMatrix, bool print = false) {
 	/*
 	 Scale each of the rows so the first component is one
 	 To get
-	 [ 1 a b ]
-	 [ 0 1 c ]
-	 [ 0 0 1 ]
+	 [ 1 a b p ]
+	 [ 0 1 c q ]
+	 [ 0 0 1 r ]
 	 */
 	if (!closeEnough(pointMatrix[0][0], 0.f, 0.00001f)) {
-		scaleRow(pointMatrix, 0, 1.0f / pointMatrix[0][0]);
+		pointMatrix.scaleRow(0, 1.0f / pointMatrix[0][0]);
 		MaybePrint(pointMatrix);
 	}
 	if (!closeEnough(pointMatrix[1][1], 0.f, 0.00001f)) {
-		scaleRow(pointMatrix, 1, 1.0f / pointMatrix[1][1]);
+		pointMatrix.scaleRow(1, 1.0f / pointMatrix[1][1]);
 		MaybePrint(pointMatrix);
 	}
 	if (!closeEnough(pointMatrix[2][2], 0.f, 0.00001f)) {
-		scaleRow(pointMatrix, 2, 1.0f / pointMatrix[2][2]);
+		pointMatrix.scaleRow(2, 1.0f / pointMatrix[2][2]);
 		MaybePrint(pointMatrix);
 	}
 
 	/*
 	 At this point the matrix is
-	 [ 1 a b ]   ( x )   ( uv0' )
-	 [ 0 1 c ] x ( y ) = ( uv1' )
-	 [ 0 0 1 ]   ( z )   ( uv2' )
+	 [ 1 a b p ]   ( x )   ( uv0' )
+	 [ 0 1 c q ] x ( y ) = ( uv1' )
+	 [ 0 0 1 r ]   ( z )   ( uv2' )
+	               ( d )
 	 where
-	 x + ay + bz = uv0
-		  y + cz = uv1
-			   z = uv2
-	 therefore
-	 z = uv2'
-	 y = uv1' - cz
-	 x = uv0' - ay - bz
+	 x + ay + bz + pd = uv0
+	 y + cz + qd = uv1
+	 z + rd = uv2
+
+	 d is free variable
 	 */
 
+	// RREF
+
+	if (!closeEnough(pointMatrix[2][2], 0.f, 0.00001f)) {
+		pointMatrix.addRow(1, 2, -pointMatrix[1][2] / pointMatrix[2][2]);
+		pointMatrix.addRow(0, 2, -pointMatrix[0][2] / pointMatrix[2][2]);
+	}
+
+	if (!closeEnough(pointMatrix[1][1], 0.f, 0.00001f)) {
+		pointMatrix.addRow(0, 1, -pointMatrix[0][1] / pointMatrix[1][1]);
+	}
+
+	// Scale + swap rows
+
+	// If 1st column is null
+	if (closeEnough(pointMatrix[0][0], 0.f, 0.00001f) && closeEnough(pointMatrix[1][0], 0.f, 0.00001f) && closeEnough(pointMatrix[2][0], 0.f, 0.00001f))
+	{
+		if (!(closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f)))
+		{
+			// Check if third column isnt null
+			int zid = 2; // Make the zval on the bottom row
+
+			if (!closeEnough(pointMatrix[0][2], 0.f, 0.00001f))
+				zid = 0;
+			else if (!closeEnough(pointMatrix[1][2], 0.f, 0.00001f))
+				zid = 1;
+
+			if (zid != 2)
+				pointMatrix.swapRows(zid, 2);
+		}
+
+		if (!(closeEnough(pointMatrix[0][1], 0.f, 0.00001f) && closeEnough(pointMatrix[1][1], 0.f, 0.00001f) && closeEnough(pointMatrix[2][1], 0.f, 0.00001f)))
+		{
+			// Check if 2nd column isnt null
+			int yid = 1; // Make the yval on the middle row
+
+			if (!closeEnough(pointMatrix[0][1], 0.f, 0.00001f))
+				yid = 0;
+			else if (!closeEnough(pointMatrix[2][1], 0.f, 0.00001f))
+				yid = 2;
+
+			if (yid != 1)
+				pointMatrix.swapRows(yid, 1);
+		}
+	}
+
+	// If 2nd column is null
+	if (closeEnough(pointMatrix[0][1], 0.f, 0.00001f) && closeEnough(pointMatrix[1][1], 0.f, 0.00001f) && closeEnough(pointMatrix[2][1], 0.f, 0.00001f))
+	{
+		if (!(closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f)))
+		{
+			// Check if third column isnt null
+			int zid = 2; // Make the zval on the bottom row
+
+			if (!closeEnough(pointMatrix[0][2], 0.f, 0.00001f))
+				zid = 0;
+			else if (!closeEnough(pointMatrix[1][2], 0.f, 0.00001f))
+				zid = 1;
+
+			if (zid != 2)
+				pointMatrix.swapRows(zid, 2);
+		}
+
+		if (!(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) && closeEnough(pointMatrix[1][0], 0.f, 0.00001f) && closeEnough(pointMatrix[2][0], 0.f, 0.00001f)))
+		{
+			// Check if first column isnt null
+			int xid = 0; // Make the xval on the top row
+
+			if (!closeEnough(pointMatrix[1][0], 0.f, 0.00001f))
+				xid = 1;
+			else if (!closeEnough(pointMatrix[2][0], 0.f, 0.00001f))
+				xid = 2;
+
+			if (xid != 0)
+				pointMatrix.swapRows(xid, 0);
+		}
+	}
+
+	// If 3rd column is null
+	if (closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f))
+	{
+		if (!(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) && closeEnough(pointMatrix[1][0], 0.f, 0.00001f) && closeEnough(pointMatrix[2][0], 0.f, 0.00001f)))
+		{
+			// Check if first column isnt null
+			int xid = 0; // Make the xval on the top row
+
+			if (!closeEnough(pointMatrix[1][0], 0.f, 0.00001f))
+				xid = 1;
+			else if (!closeEnough(pointMatrix[2][0], 0.f, 0.00001f))
+				xid = 2;
+
+			if (xid != 0)
+				pointMatrix.swapRows(xid, 0);
+		}
+
+		if (!(closeEnough(pointMatrix[0][1], 0.f, 0.00001f) && closeEnough(pointMatrix[1][1], 0.f, 0.00001f) && closeEnough(pointMatrix[2][1], 0.f, 0.00001f)))
+		{
+			// Check if 2nd column isnt null
+			int yid = 1; // Make the yval on the middle row
+
+			if (!closeEnough(pointMatrix[0][1], 0.f, 0.00001f))
+				yid = 0;
+			else if (!closeEnough(pointMatrix[2][1], 0.f, 0.00001f))
+				yid = 2;
+
+			if (yid != 1)
+				pointMatrix.swapRows(yid, 1);
+		}
+	}
+
+	if (!closeEnough(pointMatrix[0][0], 0.f, 0.00001f)) {
+		pointMatrix.scaleRow(0, 1.0f / pointMatrix[0][0]);
+		MaybePrint(pointMatrix);
+	}
+	if (!closeEnough(pointMatrix[1][1], 0.f, 0.00001f)) {
+		pointMatrix.scaleRow(1, 1.0f / pointMatrix[1][1]);
+		MaybePrint(pointMatrix);
+	}
+	if (!closeEnough(pointMatrix[2][2], 0.f, 0.00001f)) {
+		pointMatrix.scaleRow(2, 1.0f / pointMatrix[2][2]);
+		MaybePrint(pointMatrix);
+	}
+
+	// Rigourous checks if we did manage RREF
+	assert(closeEnough(pointMatrix[1][0], 0.f, 0.00001f));
+	assert(closeEnough(pointMatrix[2][0], 0.f, 0.00001f));
+	assert(closeEnough(pointMatrix[2][1], 0.f, 0.00001f));
+	assert(closeEnough(pointMatrix[0][1], 0.f, 0.00001f));
+	assert(closeEnough(pointMatrix[0][2], 0.f, 0.00001f));
+	assert(closeEnough(pointMatrix[1][2], 0.f, 0.00001f));
+
+	assert(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) || closeEnough(pointMatrix[0][0], 1.f, 0.00001f));
+	assert(closeEnough(pointMatrix[1][1], 0.f, 0.00001f) || closeEnough(pointMatrix[1][1], 1.f, 0.00001f));
+	assert(closeEnough(pointMatrix[2][2], 0.f, 0.00001f) || closeEnough(pointMatrix[2][2], 1.f, 0.00001f));
+
+	/*
+		 [ 1 0 0 p ]   ( x )   ( uv0' )
+		 [ 0 1 0 q ] x ( y ) = ( uv1' )
+		 [ 0 0 1 r ]   ( z )   ( uv2' )
+					   ( d )
+	*/
+
 	 //Convenience
-	const glm::vec4& xvec = pointMatrix[0];
-	const glm::vec4& yvec = pointMatrix[1];
-	const glm::vec4& zvec = pointMatrix[2];
+	const Vec5& xvec = pointMatrix[0];
+	const Vec5& yvec = pointMatrix[1];
+	const Vec5& zvec = pointMatrix[2];
+
+	int rank = 0;
+	if (pointMatrix[0][0] == 1)
+		rank++;
+	if (pointMatrix[1][1] == 1)
+		rank++;
+	if (pointMatrix[2][2] == 1)
+		rank++;
+
+	float x, y, z, d;
+
+	// Easy
+	if (rank == 3) {
+		d = 0;
+		z = zvec[4];
+		y = yvec[4] - z * yvec[2];
+		x = xvec[4] - y * xvec[1] - z * xvec[2];
+	}
+
+	// One of the columns is null
+	if (rank == 2)
+	{
+		// Find which one is null and solve
+		if (zvec[2] == 0)
+		{
+			/*
+				 [ 1 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 1 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 0 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+			// 3rd column is null
+			d = zvec[4] / zvec[3];
+			z = 0;
+			y = yvec[4] - yvec[3] * d;
+			x = xvec[4] - xvec[3] * d;
+		}
+		else if (yvec[1] == 0)
+		{
+			/*
+				 [ 1 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 0 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 1 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+			// 2nd column is null
+			d = yvec[4] / yvec[3];
+			y = 0;
+			z = zvec[4] - zvec[3] * d;
+			x = xvec[4] - xvec[3] * d;
+		}
+		else if (xvec[0] == 0)
+		{
+			/*
+				 [ 0 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 1 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 1 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+			// First column is null
+			d = xvec[4] / xvec[3];
+			x = 0;
+			y = yvec[4] - yvec[3] * d;
+			z = zvec[4] - zvec[3] * d;
+		}
+	}
+
+	// Two columns are null
+	if (rank == 1)
+	{
+		// Find the non null
+		if (xvec[0] == 1) 
+		{
+			/*
+				 [ 1 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 0 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 0 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+
+			if (yvec[3] == 0 && yvec[4] != 0) {
+				/*
+					 [ 1 0 0 p ]   ( x )   ( uv0' )
+					 [ 0 0 0 0 ] x ( y ) = ( uv1' )
+					 [ 0 0 0 r ]   ( z )   ( uv2' )
+								   ( d )
+				*/
+				throw std::exception("Invalid texgen for one of the faces"); // No solution
+			}
+			
+			if (zvec[3] == 0) {
+				if (zvec[4] != 0)
+					/*
+						 [ 1 0 0 p ]   ( x )   ( uv0' )
+						 [ 0 0 0 q ] x ( y ) = ( uv1' )
+						 [ 0 0 0 0 ]   ( z )   ( uv2' )
+									   ( d )
+					*/
+					throw std::exception("Invalid texgen for one of the faces"); // No solution
+
+				// otherwise the entire third row is 0 and is already "solved"
+			} 
+			else 
+			{
+				/*
+					 [ 1 0 0 p  ]   ( x )   ( uv0'     )
+					 [ 0 0 0 kr ] x ( y ) = ( k * uv2' )
+					 [ 0 0 0 r  ]   ( z )   ( uv2'     )
+								    ( d )
+				*/
+				d = zvec[4] / zvec[3];
+				y = 0;
+				assert(closeEnough(yvec[3] * d, yvec[4])); // Gotta see if this works
+				x = xvec[4] - xvec[3] * d;
+				z = 0;
+			}
+		}
+
+		if (yvec[1] == 1)
+		{
+			/*
+				 [ 0 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 1 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 0 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+
+			if (xvec[3] == 0 && xvec[4] != 0) {
+				/*
+					 [ 0 0 0 0 ]   ( x )   ( uv0' )
+					 [ 0 1 0 q ] x ( y ) = ( uv1' )
+					 [ 0 0 0 r ]   ( z )   ( uv2' )
+								   ( d )
+				*/
+				throw std::exception("Invalid texgen for one of the faces"); // No solution
+			}
+
+			if (zvec[3] == 0) {
+				if (zvec[4] != 0)
+					/*
+						 [ 0 0 0 p ]   ( x )   ( uv0' )
+						 [ 0 1 0 q ] x ( y ) = ( uv1' )
+						 [ 0 0 0 0 ]   ( z )   ( uv2' )
+									   ( d )
+					*/
+					throw std::exception("Invalid texgen for one of the faces"); // No solution
+
+				// otherwise the entire third row is 0 and is already "solved"
+			}
+			else
+			{
+				/*
+					 [ 0 0 0 p ]   ( x )   ( uv0' )
+					 [ 0 1 0 q ] x ( y ) = ( uv1' )
+					 [ 0 0 0 r ]   ( z )   ( uv2' )
+								   ( d )
+				*/
+				d = zvec[4] / zvec[3];
+				z = 0;
+				assert(closeEnough(xvec[3] * d, xvec[4])); // Gotta see if this works
+				y = yvec[4] - yvec[3] * d;
+				x = 0;
+			}
+		}
+
+		if (zvec[1] == 1)
+		{
+			/*
+				 [ 0 0 0 p ]   ( x )   ( uv0' )
+				 [ 0 0 0 q ] x ( y ) = ( uv1' )
+				 [ 0 0 1 r ]   ( z )   ( uv2' )
+							   ( d )
+			*/
+
+			if (xvec[3] == 0 && xvec[4] != 0) {
+				/*
+					 [ 0 0 0 0 ]   ( x )   ( uv0' )
+					 [ 0 0 0 q ] x ( y ) = ( uv1' )
+					 [ 0 0 1 r ]   ( z )   ( uv2' )
+								   ( d )
+				*/
+				throw std::exception("Invalid texgen for one of the faces"); // No solution
+			}
+
+			if (yvec[3] == 0) {
+				if (yvec[4] != 0)
+					/*
+						 [ 0 0 0 p ]   ( x )   ( uv0' )
+						 [ 0 0 0 0 ] x ( y ) = ( uv1' )
+						 [ 0 0 1 r ]   ( z )   ( uv2' )
+									   ( d )
+					*/
+					throw std::exception("Invalid texgen for one of the faces"); // No solution
+
+				// otherwise the entire second row is 0 and is already "solved"
+			}
+			else
+			{
+				/*
+					 [ 0 0 0 p ]   ( x )   ( uv0' )
+					 [ 0 0 0 q ] x ( y ) = ( uv1' )
+					 [ 0 0 1 r ]   ( z )   ( uv2' )
+								   ( d )
+				*/
+				d = yvec[4] / yvec[3];
+				y = 0;
+				assert(closeEnough(xvec[3] * d, xvec[4])); // Gotta see if this works
+				z = zvec[4] - zvec[3] * d;
+				x = 0;
+			}
+		}
+	}
 
 	//These are easy now
-	float z = zvec[3];
-	float y = yvec[3] - z * yvec[2];
-	float x = xvec[3] - y * xvec[1] - z * xvec[2];
 
 	//Check our work
-//	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2], test[0][3]));
-//	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2], test[1][3]));
-//	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2], test[2][3]));
+	assert(closeEnough(x * test[0][0] + y * test[0][1] + z * test[0][2] + d, test[0][4]));
+	assert(closeEnough(x * test[1][0] + y * test[1][1] + z * test[1][2] + d, test[1][4]));
+	assert(closeEnough(x * test[2][0] + y * test[2][1] + z * test[2][2] + d, test[2][4]));
 
 	//And there we go
-	return glm::vec3(x, y, z);
+	return glm::vec4(x, y, z, d);
 }
 
 Interior::TexGenEq getTexGenFromPoints(const glm::vec3& point0, const glm::vec3& point1, const glm::vec3& point2,
@@ -1707,12 +2154,12 @@ Interior::TexGenEq getTexGenFromPoints(const glm::vec3& point0, const glm::vec3&
 	Interior::TexGenEq texGen;
 
 	//Construct these matrices for the solver to figure out
-	glm::mat3x4	xTexMat = glm::mat3x4(glm::vec4(point0, uv0.x), glm::vec4(point1, uv1.x), glm::vec4(point2, uv2.x));
-	glm::mat3x4 yTexMat = glm::mat3x4(glm::vec4(point0, uv0.y), glm::vec4(point1, uv1.y), glm::vec4(point2, uv2.y));
+	Mat3x5 xTexMat = Mat3x5(Vec5(point0.x, point0.y, point0.z, 1, uv0.x), Vec5(point1.x, point1.y, point1.z, 1, uv1.x), Vec5(point2.x, point2.y, point2.z, 1, uv2.x));
+	Mat3x5 yTexMat = Mat3x5(Vec5(point0.x, point0.y, point0.z, 1, uv0.y), Vec5(point1.x, point1.y, point1.z, 1, uv1.y), Vec5(point2.x, point2.y, point2.z, 1, uv2.y));
 
 	//Solving is rather simple
-	glm::vec3 xsolve = solveMatrix(xTexMat);
-	glm::vec3 ysolve = solveMatrix(yTexMat);
+	glm::vec4 xsolve = solveMatrix(xTexMat);
+	glm::vec4 ysolve = solveMatrix(yTexMat);
 
 	//Rigorous checking because I don't like being wrong
 	if (!closeEnough(xsolve.x * point0.x + xsolve.y * point0.y + xsolve.z * point0.z, uv0.x, 0.001f)) {
@@ -1738,9 +2185,11 @@ Interior::TexGenEq getTexGenFromPoints(const glm::vec3& point0, const glm::vec3&
 	texGen.planeX.x = xsolve.x;
 	texGen.planeX.y = xsolve.y;
 	texGen.planeX.z = xsolve.z;
+	texGen.planeX.d = xsolve.w;
 	texGen.planeY.x = ysolve.x;
 	texGen.planeY.y = ysolve.y;
 	texGen.planeY.z = ysolve.z;
+	texGen.planeY.d = ysolve.w;
 
 	return texGen;
 }
