@@ -1793,9 +1793,14 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 
 	// Scale + swap rows
 
+	bool firstnull = false;
+	bool secondnull = false;
+	bool thirdnull = false;
+
 	// If 1st column is null
 	if (closeEnough(pointMatrix[0][0], 0.f, 0.00001f) && closeEnough(pointMatrix[1][0], 0.f, 0.00001f) && closeEnough(pointMatrix[2][0], 0.f, 0.00001f))
 	{
+		firstnull = true;
 		if (!(closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f)))
 		{
 			// Check if third column isnt null
@@ -1828,6 +1833,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 	// If 2nd column is null
 	if (closeEnough(pointMatrix[0][1], 0.f, 0.00001f) && closeEnough(pointMatrix[1][1], 0.f, 0.00001f) && closeEnough(pointMatrix[2][1], 0.f, 0.00001f))
 	{
+		secondnull = true;
 		if (!(closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f)))
 		{
 			// Check if third column isnt null
@@ -1860,6 +1866,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 	// If 3rd column is null
 	if (closeEnough(pointMatrix[0][2], 0.f, 0.00001f) && closeEnough(pointMatrix[1][2], 0.f, 0.00001f) && closeEnough(pointMatrix[2][2], 0.f, 0.00001f))
 	{
+		thirdnull = true;
 		if (!(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) && closeEnough(pointMatrix[1][0], 0.f, 0.00001f) && closeEnough(pointMatrix[2][0], 0.f, 0.00001f)))
 		{
 			// Check if first column isnt null
@@ -1902,18 +1909,6 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 		MaybePrint(pointMatrix);
 	}
 
-	// Rigourous checks if we did manage RREF
-	assert(closeEnough(pointMatrix[1][0], 0.f, 0.00001f));
-	assert(closeEnough(pointMatrix[2][0], 0.f, 0.00001f));
-	assert(closeEnough(pointMatrix[2][1], 0.f, 0.00001f));
-	assert(closeEnough(pointMatrix[0][1], 0.f, 0.00001f));
-	assert(closeEnough(pointMatrix[0][2], 0.f, 0.00001f));
-	assert(closeEnough(pointMatrix[1][2], 0.f, 0.00001f));
-
-	assert(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) || closeEnough(pointMatrix[0][0], 1.f, 0.00001f));
-	assert(closeEnough(pointMatrix[1][1], 0.f, 0.00001f) || closeEnough(pointMatrix[1][1], 1.f, 0.00001f));
-	assert(closeEnough(pointMatrix[2][2], 0.f, 0.00001f) || closeEnough(pointMatrix[2][2], 1.f, 0.00001f));
-
 	/*
 		 [ 1 0 0 p ]   ( x )   ( uv0' )
 		 [ 0 1 0 q ] x ( y ) = ( uv1' )
@@ -1934,6 +1929,21 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 	if (pointMatrix[2][2] == 1)
 		rank++;
 
+	// Rigourous checks if we did manage RREF
+	if (rank == 3) {
+		assert(closeEnough(pointMatrix[1][0], 0.f, 0.00001f));
+		assert(closeEnough(pointMatrix[2][0], 0.f, 0.00001f));
+		assert(closeEnough(pointMatrix[2][1], 0.f, 0.00001f));
+		assert(closeEnough(pointMatrix[0][1], 0.f, 0.00001f));
+		assert(closeEnough(pointMatrix[0][2], 0.f, 0.00001f));
+		assert(closeEnough(pointMatrix[1][2], 0.f, 0.00001f));
+
+		assert(closeEnough(pointMatrix[0][0], 0.f, 0.00001f) || closeEnough(pointMatrix[0][0], 1.f, 0.00001f));
+		assert(closeEnough(pointMatrix[1][1], 0.f, 0.00001f) || closeEnough(pointMatrix[1][1], 1.f, 0.00001f));
+		assert(closeEnough(pointMatrix[2][2], 0.f, 0.00001f) || closeEnough(pointMatrix[2][2], 1.f, 0.00001f));
+	}
+	
+
 	float x, y, z, d;
 
 	// Easy
@@ -1948,7 +1958,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 	if (rank == 2)
 	{
 		// Find which one is null and solve
-		if (zvec[2] == 0)
+		if (closeEnough(zvec[2], 0.f, 0.0001f))
 		{
 			/*
 				 [ 1 0 0 p ]   ( x )   ( uv0' )
@@ -1962,7 +1972,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 			y = yvec[4] - yvec[3] * d;
 			x = xvec[4] - xvec[3] * d;
 		}
-		else if (yvec[1] == 0)
+		else if (closeEnough(yvec[1], 0.f, 0.0001f))
 		{
 			/*
 				 [ 1 0 0 p ]   ( x )   ( uv0' )
@@ -1976,7 +1986,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 			z = zvec[4] - zvec[3] * d;
 			x = xvec[4] - xvec[3] * d;
 		}
-		else if (xvec[0] == 0)
+		else if (closeEnough(xvec[0], 0.f, 0.0001f))
 		{
 			/*
 				 [ 0 0 0 p ]   ( x )   ( uv0' )
@@ -1996,7 +2006,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 	if (rank == 1)
 	{
 		// Find the non null
-		if (xvec[0] == 1) 
+		if (closeEnough(xvec[0], 1.f, 0.0001f))
 		{
 			/*
 				 [ 1 0 0 p ]   ( x )   ( uv0' )
@@ -2005,7 +2015,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 							   ( d )
 			*/
 
-			if (yvec[3] == 0 && yvec[4] != 0) {
+			if (closeEnough(yvec[3], 0.f, 0.0001f) && !closeEnough(yvec[4], 0.f, 0.0001f)) {
 				/*
 					 [ 1 0 0 p ]   ( x )   ( uv0' )
 					 [ 0 0 0 0 ] x ( y ) = ( uv1' )
@@ -2015,8 +2025,8 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 				throw std::exception("Invalid texgen for one of the faces"); // No solution
 			}
 			
-			if (zvec[3] == 0) {
-				if (zvec[4] != 0)
+			if (closeEnough(zvec[3], 0.f, 0.0001f)) {
+				if (!closeEnough(zvec[4], 0.f, 0.0001f))
 					/*
 						 [ 1 0 0 p ]   ( x )   ( uv0' )
 						 [ 0 0 0 q ] x ( y ) = ( uv1' )
@@ -2043,7 +2053,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 			}
 		}
 
-		if (yvec[1] == 1)
+		if (closeEnough(yvec[1], 1.f, 0.0001f))
 		{
 			/*
 				 [ 0 0 0 p ]   ( x )   ( uv0' )
@@ -2052,7 +2062,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 							   ( d )
 			*/
 
-			if (xvec[3] == 0 && xvec[4] != 0) {
+			if (closeEnough(xvec[3], 0.f, 0.0001f) && closeEnough(xvec[4], 0.f, 0.0001f)) {
 				/*
 					 [ 0 0 0 0 ]   ( x )   ( uv0' )
 					 [ 0 1 0 q ] x ( y ) = ( uv1' )
@@ -2062,8 +2072,8 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 				throw std::exception("Invalid texgen for one of the faces"); // No solution
 			}
 
-			if (zvec[3] == 0) {
-				if (zvec[4] != 0)
+			if (closeEnough(xvec[3], 0.f, 0.0001f)) {
+				if (!closeEnough(xvec[4], 0.f, 0.0001f))
 					/*
 						 [ 0 0 0 p ]   ( x )   ( uv0' )
 						 [ 0 1 0 q ] x ( y ) = ( uv1' )
@@ -2090,7 +2100,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 			}
 		}
 
-		if (zvec[1] == 1)
+		if (closeEnough(zvec[1], 1.f, 0.0001f))
 		{
 			/*
 				 [ 0 0 0 p ]   ( x )   ( uv0' )
@@ -2099,7 +2109,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 							   ( d )
 			*/
 
-			if (xvec[3] == 0 && xvec[4] != 0) {
+			if (closeEnough(xvec[3], 0.f, 0.0001f) && !closeEnough(xvec[4], 0.f, 0.0001f)) {
 				/*
 					 [ 0 0 0 0 ]   ( x )   ( uv0' )
 					 [ 0 0 0 q ] x ( y ) = ( uv1' )
@@ -2109,8 +2119,8 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 				throw std::exception("Invalid texgen for one of the faces"); // No solution
 			}
 
-			if (yvec[3] == 0) {
-				if (yvec[4] != 0)
+			if (closeEnough(yvec[3], 0.f, 0.0001f)) {
+				if (!closeEnough(yvec[4], 0.f, 0.0001f))
 					/*
 						 [ 0 0 0 p ]   ( x )   ( uv0' )
 						 [ 0 0 0 0 ] x ( y ) = ( uv1' )
