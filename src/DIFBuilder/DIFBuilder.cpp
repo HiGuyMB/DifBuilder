@@ -33,6 +33,7 @@
 #include <unordered_map>
 #include <sstream>
 #include <glm/detail/type_mat.hpp>
+#include <unordered_set>
 DIF_NAMESPACE
 
 struct ObjectHash
@@ -1097,7 +1098,7 @@ void buildHullPolyLists(Interior& interior)
 								glm::vec3 firstNormal = interior.normal[interior.plane[first.planeIndices[l] & ~0x8000].normalIndex];
 								if ((first.planeIndices[l] >> 15) != 0)
 									firstNormal *= -1;
-								glm::vec3 secondNormal = interior.normal[interior.plane[first.planeIndices[m] & ~0x8000].normalIndex];
+								glm::vec3 secondNormal = interior.normal[interior.plane[second.planeIndices[m] & ~0x8000].normalIndex];
 								if ((second.planeIndices[l] >> 15) != 0)
 									secondNormal *= -1;
 
@@ -1250,6 +1251,203 @@ void buildHullPolyLists(Interior& interior)
 
 }
 
+struct PolyGroup
+{
+	glm::vec3 min;
+	glm::vec3 max;
+	std::vector<Polygon*> polys;
+
+	PolyGroup()
+	{
+		min = glm::vec3(1e8, 1e8, 1e8);
+		max = glm::vec3(-1e8, -1e8, -1e8);
+	}
+
+	void addPolygon(Polygon* poly)
+	{
+		polys.push_back(poly);
+		min.x = std::min(min.x, poly->min.x);
+		min.y = std::min(min.y, poly->min.y);
+		min.z = std::min(min.z, poly->min.z);
+		max.x = std::max(max.x, poly->max.x);
+		max.y = std::max(max.y, poly->max.y);
+		max.z = std::max(max.z, poly->max.z);
+	}
+
+	float surfaceArea() {
+		return (max.x - min.x) * (max.y - min.y) + (max.x - min.x) * (max.z - min.z) + (max.y - min.y) * (max.z - min.z);
+	}
+	
+	float surfaceAreaIfAdd(Polygon* poly)
+	{
+		glm::vec3 newMin = min;
+		glm::vec3 newMax = max;
+		newMin.x = std::min(newMin.x, poly->min.x);
+		newMin.y = std::min(newMin.y, poly->min.y);
+		newMin.z = std::min(newMin.z, poly->min.z);
+		newMax.x = std::max(newMax.x, poly->max.x);
+		newMax.y = std::max(newMax.y, poly->max.y);
+		newMax.z = std::max(newMax.z, poly->max.z);
+		return ((newMax.x - newMin.x) * (newMax.y - newMin.y) + (newMax.x - newMin.x) * (newMax.z - newMin.z) + (newMax.y - newMin.y) * (newMax.z - newMin.z)) - surfaceArea();
+	}
+};
+
+std::vector<std::vector<Polygon*>> subdividePolyGroup(std::vector<Polygon*> inputgroup)
+{
+	std::vector<PolyGroup> groups;
+	float totalSurfaceArea = 0.0;
+	
+	for (auto& poly : inputgroup)
+	{
+		if (groups.size())
+		{
+			std::vector<float> costs;
+			float newCost = (poly->max.x - poly->min.x) * (poly->max.y - poly->min.y) + (poly->max.x - poly->min.x) * (poly->max.z - poly->min.z) + (poly->max.y - poly->min.y) * (poly->max.z - poly->min.z);
+			costs.push_back(newCost);
+
+			for (auto& g : groups)
+				costs.push_back(g.surfaceAreaIfAdd(poly));
+
+			float minCost = costs[0];
+			int minCostIndex = 0;
+			for (int i = 1; i < costs.size(); i++)
+			{
+				if (costs[i] < minCost)
+				{
+					minCost = costs[i];
+					minCostIndex = i;
+				}
+			}
+			
+			if (minCostIndex == 0)
+			{
+				PolyGroup newGroup;
+				newGroup.addPolygon(poly);
+				groups.push_back(newGroup);
+			}
+			else
+			{
+				groups[minCostIndex - 1].addPolygon(poly);
+			}
+		}
+		else
+		{
+			PolyGroup p;
+			p.min = poly->min;
+			p.max = poly->max;
+			p.polys.push_back(poly);
+			groups.push_back(p);
+			totalSurfaceArea += p.surfaceArea();
+		}
+	}
+	std::vector<std::vector<Polygon*>> ret;
+	for (auto& g : groups)
+		ret.push_back(g.polys);
+	return ret;
+}
+
+std::vector<std::vector<Polygon*>> groupPolys(std::vector<Polygon*>& polyList)
+{
+	glm::vec3 boundsMin = glm::vec3(1e8, 1e8, 1e8);
+	glm::vec3 boundsMax = glm::vec3(-1e8, -1e8, -1e8);
+
+	for (auto& g : polyList)
+	{
+		for (auto& v : g->VertexList)
+		{
+			boundsMin.x = std::min(boundsMin.x, v.p.x);
+			boundsMin.y = std::min(boundsMin.y, v.p.y);
+			boundsMin.z = std::min(boundsMin.z, v.p.z);
+			boundsMax.x = std::max(boundsMax.x, v.p.x);
+			boundsMax.y = std::max(boundsMax.y, v.p.y);
+			boundsMax.z = std::max(boundsMax.z, v.p.z);
+		}
+	}
+
+	std::vector<Polygon*> polyBins[256];
+
+	for (int i = 0; i < 16; i++)
+	{
+		float minX = boundsMin.x;
+		float maxX = boundsMin.x;
+		minX += i * ((boundsMax.x - boundsMin.x) / 16);
+		maxX += (i + 1) * ((boundsMax.x - boundsMin.x) / 16);
+		for (int j = 0; j < 16; j++)
+		{
+			float minY = boundsMin.y;
+			float maxY = boundsMin.y;
+			minY += j * ((boundsMax.y - boundsMin.y) / 16);
+			maxY += (j + 1) * ((boundsMax.y - boundsMin.y) / 16);
+
+			int binIndex = (i * 16) + j;
+
+			for (auto& poly : polyList)
+			{
+				if (minX <= poly->min.x && maxX >= poly->max.x && minY <= poly->min.y && maxY >= poly->max.y)
+				{
+					polyBins[binIndex].push_back(poly);
+				}
+			}
+		}
+	}
+
+	std::vector<std::vector<Polygon*>> ret;
+	
+	for (int i = 0; i < 256; i++)
+	{
+		std::vector<std::vector<Polygon*>> subdivided = subdividePolyGroup(polyBins[i]);
+		for (auto& g : subdivided)
+		{
+			if (g.size() > 16) // Divide more if this
+			{
+				int fullpolycount = g.size() / 16;
+				int rem = g.size() % 16;
+
+				for (int i = 0; i < g.size() - rem; i += 16)
+				{
+					std::vector<Polygon*> polysList = std::vector<Polygon*>();
+					for (int j = 0; j < 16; j++)
+						polysList.push_back(g.at(i + j));
+
+					ret.push_back(polysList);
+				}
+				std::vector<Polygon*> lastPolys = std::vector<Polygon*>();
+				for (int i = g.size() - rem; i < g.size(); i++)
+				{
+					lastPolys.push_back(g.at(i));
+				}
+				if (lastPolys.size() != 0)
+					ret.push_back(lastPolys);
+			}
+			else
+			{
+				ret.push_back(g);
+			}
+		}
+	}
+
+	std::unordered_set<Polygon*> usedPolys;
+	std::vector<std::vector<Polygon*>> finalList;
+	
+	for (auto& glist : ret)
+	{
+		std::vector<Polygon*> newlist;
+		for (auto& g : glist)
+		{
+			if (usedPolys.find(g) != usedPolys.end())
+				continue;
+
+			newlist.push_back(g);
+			usedPolys.insert(g);
+		}
+
+		if (newlist.size() != 0)
+			finalList.push_back(newlist);
+	}
+
+	return finalList;
+}
+
 void DIFBuilder::build(DIF& dif, bool flipNormals)
 {
 
@@ -1302,6 +1500,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 			poly->plane = Plane(mTriangles[i].points[2].vertex, mTriangles[i].points[1].vertex, mTriangles[i].points[0].vertex);
 			poly->Normal = poly->plane.normal;
 		}
+		poly->calculateBounds();
 		polyList.push_back(poly);
 	}
 
@@ -1354,26 +1553,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//	orderedpolys->push_back(&poly);
 	//}
 
-	std::vector<std::vector<Polygon*>> groupedPolys = std::vector<std::vector<Polygon*>>();
-
-	int fullpolycount = orderedpolys.size() / 8;
-	int rem = orderedpolys.size() % 8;
-
-	for (int i = 0; i < orderedpolys.size() - rem; i += 8)
-	{
-		std::vector<Polygon*> polysList = std::vector<Polygon*>();
-		for (int j = 0; j < 8; j++)
-			polysList.push_back(orderedpolys.at(i + j));
-
-		groupedPolys.push_back(polysList);
-	}
-	std::vector<Polygon*> lastPolys = std::vector<Polygon*>();
-	for (int i = orderedpolys.size() - rem; i < orderedpolys.size(); i++)
-	{
-		lastPolys.push_back(orderedpolys.at(i));
-	}
-	if (lastPolys.size() != 0)
-		groupedPolys.push_back(lastPolys);
+	std::vector<std::vector<Polygon*>> groupedPolys = groupPolys(orderedpolys);
 
 	printf("Exporting Convex Hulls\n");
 	std::vector<ObjectHash> emitStrHashes;
