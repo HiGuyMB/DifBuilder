@@ -453,7 +453,7 @@ int CreateLeafIndex(int baseIndex, bool isSolid)
 	return baseRet | baseIndex;
 }
 
-int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, PlaneMap& planeIndices, std::vector<std::string> materialList, std::vector<Polygon*>* orderedpolys)
+int ExportBSP(Interior *interior, BSPNode* n, PlaneMap& planeIndices, std::vector<std::string> materialList, std::vector<Polygon*>* orderedpolys)
 {
 	if (n->IsLeaf)
 	{
@@ -494,8 +494,8 @@ int ExportBSP(Interior *interior, BSPNode* n, std::vector<Polygon*>* polys, Plan
 		int nodeindex = interior->bspNode.size();
 		interior->bspNode.push_back(bspnode);
 
-		int frontIndex = n->Front != NULL ? ExportBSP(interior, n->Front, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
-		int backIndex = n->Back != NULL ? ExportBSP(interior, n->Back, polys, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
+		int frontIndex = n->Front != NULL ? ExportBSP(interior, n->Front, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
+		int backIndex = n->Back != NULL ? ExportBSP(interior, n->Back, planeIndices, materialList, orderedpolys) : CreateLeafIndex(0, false);
 
 		interior->bspNode[nodeindex].frontIndex = frontIndex;
 		interior->bspNode[nodeindex].backIndex = backIndex;
@@ -639,6 +639,22 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 		hull.maxX = maxx;
 		hull.maxY = maxy;
 		hull.maxZ = maxz;
+
+		// Expand the bounding box a bit
+		if (abs(hull.maxX - hull.minX) < 0.0001) {
+			hull.minX -= 0.001;
+			hull.maxX += 0.001;
+		}
+
+		if (abs(hull.maxY - hull.minY) < 0.0001) {
+			hull.minY -= 0.001;
+			hull.maxY += 0.001;
+		}
+
+		if (abs(hull.maxZ - hull.minZ) < 0.0001) {
+			hull.minZ -= 0.001;
+			hull.maxZ += 0.001;
+		}
 
 		//This is straight up copied from map2dif
 		if (exportEmitStrings)
@@ -803,6 +819,8 @@ void ExportCoordBins(Interior* interior)
 	for (int i = 0; i < 256; i++)
 		interior->coordBin.push_back(Interior::CoordBin());
 
+	std::unordered_set<int> usedHulls;
+
 	for (int i = 0; i < 16; i++)
 	{
 		float minX = interior->boundingBox.minX;
@@ -823,6 +841,10 @@ void ExportCoordBins(Interior* interior)
 			{
 				const auto& hull = interior->convexHull[k];
 
+				if (usedHulls.find(k) == usedHulls.end()) {
+					usedHulls.insert(k);
+				}
+
 				if (!(minX > hull.maxX || maxX < hull.minX || maxY < hull.minY || minY > hull.maxY))
 				{
 					interior->coordBinIndex.push_back(k);
@@ -831,6 +853,8 @@ void ExportCoordBins(Interior* interior)
 			interior->coordBin[binIndex].binCount = interior->coordBinIndex.size() - interior->coordBin[binIndex].binStart;
 		}
 	}
+
+	assert(usedHulls.size() == interior->convexHull.size()); // Make sure all hulls are put in bins
 }
 
 void ExportTrigger(DIF* dif, DIFBuilder::Trigger& trigger)
@@ -1096,10 +1120,10 @@ void buildHullPolyLists(Interior& interior)
 						for (l = 0; l < first.numPlanes; l++) {
 							for (m = 0; m < second.numPlanes; m++) {
 								glm::vec3 firstNormal = interior.normal[interior.plane[first.planeIndices[l] & ~0x8000].normalIndex];
-								if ((first.planeIndices[l] >> 15) != 0)
+								if ((first.planeIndices[l] >> 8) != 0)
 									firstNormal *= -1;
 								glm::vec3 secondNormal = interior.normal[interior.plane[second.planeIndices[m] & ~0x8000].normalIndex];
-								if ((second.planeIndices[l] >> 15) != 0)
+								if ((second.planeIndices[l] >> 8) != 0)
 									secondNormal *= -1;
 
 								F32 dot = glm::dot(firstNormal, secondNormal);
@@ -1383,7 +1407,8 @@ std::vector<std::vector<Polygon*>> groupPolys(std::vector<Polygon*>& polyList)
 
 			for (auto& poly : polyList)
 			{
-				if (minX <= poly->min.x && maxX >= poly->max.x && minY <= poly->min.y && maxY >= poly->max.y)
+				poly->calculateBounds();
+				if (!(minX > poly->max.x || maxX < poly->min.x || maxY < poly->min.y || minY > poly->max.y))
 				{
 					polyBins[binIndex].push_back(poly);
 				}
@@ -1398,31 +1423,31 @@ std::vector<std::vector<Polygon*>> groupPolys(std::vector<Polygon*>& polyList)
 		std::vector<std::vector<Polygon*>> subdivided = subdividePolyGroup(polyBins[i]);
 		for (auto& g : subdivided)
 		{
-			if (g.size() > 16) // Divide more if this
-			{
-				int fullpolycount = g.size() / 16;
-				int rem = g.size() % 16;
+			//if (g.size() > 16) // Divide more if this
+			//{
+			//	int fullpolycount = g.size() / 16;
+			//	int rem = g.size() % 16;
 
-				for (int i = 0; i < g.size() - rem; i += 16)
-				{
-					std::vector<Polygon*> polysList = std::vector<Polygon*>();
-					for (int j = 0; j < 16; j++)
-						polysList.push_back(g.at(i + j));
+			//	for (int i = 0; i < g.size() - rem; i += 16)
+			//	{
+			//		std::vector<Polygon*> polysList = std::vector<Polygon*>();
+			//		for (int j = 0; j < 16; j++)
+			//			polysList.push_back(g.at(i + j));
 
-					ret.push_back(polysList);
-				}
-				std::vector<Polygon*> lastPolys = std::vector<Polygon*>();
-				for (int i = g.size() - rem; i < g.size(); i++)
-				{
-					lastPolys.push_back(g.at(i));
-				}
-				if (lastPolys.size() != 0)
-					ret.push_back(lastPolys);
-			}
-			else
-			{
+			//		ret.push_back(polysList);
+			//	}
+			//	std::vector<Polygon*> lastPolys = std::vector<Polygon*>();
+			//	for (int i = g.size() - rem; i < g.size(); i++)
+			//	{
+			//		lastPolys.push_back(g.at(i));
+			//	}
+			//	if (lastPolys.size() != 0)
+			//		ret.push_back(lastPolys);
+			//}
+			//else
+			//{
 				ret.push_back(g);
-			}
+			// }
 		}
 	}
 
@@ -1528,7 +1553,6 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//}
 
 	printf("Gathering primitives\n");
-	std::vector<Polygon*> polys = std::vector<Polygon*>();
 	std::vector<Polygon*> orderedpolys = std::vector<Polygon*>();
 	// polys.clear();
 	// GatherBrushes(root, &polys);
@@ -1540,7 +1564,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//printf("Exporting Surfaces\n");
 	//ExportSurfaces(&interior, polys, &planehashes, mMaterials, &pointhashes);
 	printf("Exporting BSP\n");
-	ExportBSP(&interior, rootNode, &polys, planeIndices, mMaterials, &orderedpolys);
+	ExportBSP(&interior, rootNode, planeIndices, mMaterials, &orderedpolys);
 
 	for (auto& poly : polyList) {
 		if (poly->surfaceIndex == -1)
@@ -1553,12 +1577,31 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//	orderedpolys->push_back(&poly);
 	//}
 
-	std::vector<std::vector<Polygon*>> groupedPolys = groupPolys(orderedpolys);
+	std::vector<std::vector<Polygon*>> groupedPolys = groupPolys(polyList);
+	
+	int totalCount = 0;
+	for (auto& g : groupedPolys)
+	{
+		totalCount += g.size();
+	}
+	assert(totalCount == polyList.size());
 
 	printf("Exporting Convex Hulls\n");
 	std::vector<ObjectHash> emitStrHashes;
 	ExportConvexHulls(&interior, groupedPolys, planeIndices, &emitStrHashes, this->exportEmitStrings);
 
+	std::unordered_set<int> surfIndices;
+	// Check if all the surfaces are accessible from the convex hulls
+	for (auto& hull : interior.convexHull)
+	{
+		for (int i = hull.surfaceStart; i < hull.surfaceStart + hull.surfaceCount; i++)
+		{
+			if (surfIndices.find(interior.hullSurfaceIndex[i]) == surfIndices.end())
+				surfIndices.insert(interior.hullSurfaceIndex[i]);
+		}
+	}
+	assert(surfIndices.size() == polyList.size());
+	
 	printf("Exporting Convex Hull PolyLists\n");
 	buildHullPolyLists(interior);
 
@@ -1591,6 +1634,18 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	printf("Exporting CoordBins\n");
 
 	ExportCoordBins(&interior);
+
+	// Coordbin stats
+	int maxBins = 0;
+	int totalBins = 0;
+	for (int i = 0; i < 256; i++)
+	{
+		if (interior.coordBin[i].binCount > maxBins)
+			maxBins = interior.coordBin[i].binCount;
+		totalBins += interior.coordBin[i].binCount;
+	}
+	printf("Max Convexs hulls in bin: %d\n", maxBins);
+	printf("Average convex hulls per bin: %f\n", (float)totalBins / 256);
 
 	printf("Exporting PathedInteriors\n");
 	for (auto& it : mPathedInteriors)
