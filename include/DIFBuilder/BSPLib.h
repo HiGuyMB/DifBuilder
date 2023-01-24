@@ -113,6 +113,8 @@ public:
 	std::vector<int> finalWindings;
 	int planeIndex;
 	bool planeExported = false;
+	glm::vec3 min;
+	glm::vec3 max;
 
 	Polygon() {
 
@@ -133,6 +135,19 @@ public:
 		}
 
 		return cl;
+	}
+
+	void calculateBounds() {
+		min = glm::vec3(1e8, 1e8, 1e8);
+		max = glm::vec3(-1e8, -1e8, -1e8);
+		for (auto& v : VertexList) {
+			if (v.p.x < min.x) min.x = v.p.x;
+			if (v.p.y < min.y) min.y = v.p.y;
+			if (v.p.z < min.z) min.z = v.p.z;
+			if (v.p.x > max.x) max.x = v.p.x;
+			if (v.p.y > max.y) max.y = v.p.y;
+			if (v.p.z > max.z) max.z = v.p.z;
+		}
 	}
 };
 
