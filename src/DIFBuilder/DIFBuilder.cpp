@@ -240,7 +240,7 @@ short ExportPlane(Interior* interior, Plane& testplane, PlaneMap& planeIndices, 
 	int index = interior->plane.size();
 
 	if (index >= 32767)
-		throw new std::exception("Out of plane indices");
+		throw new std::runtime_error("Out of plane indices");
 
 	Interior::Plane p = Interior::Plane();
 
@@ -561,7 +561,7 @@ void ExportConvexHulls(Interior* interior, std::vector<std::vector<Polygon*>> po
 		for (int i = 0; i < hull.surfaceCount; i++) {
 			if (polys[polyIndex][i]->surfaceIndex == -1) {
 				printf("%d %d", polyIndex, i);
-				throw new std::exception("Invalid surface index");
+				throw new std::runtime_error("Invalid surface index");
 			}
 			interior->hullSurfaceIndex.push_back(polys[polyIndex][i]->surfaceIndex);
 		}
@@ -1139,7 +1139,7 @@ void buildHullPolyLists(Interior& interior)
 						}
 					}
 				}
-				assert(firstGroup != -1 && secondGroup != -1, "Error, unable to find a suitable pairing?");
+				assert(firstGroup != -1 && secondGroup != -1 && "Error, unable to find a suitable pairing?");
 
 				// Merge first and second
 				PlaneGrouping& to = planeGroups[firstGroup];
@@ -1152,7 +1152,7 @@ void buildHullPolyLists(Interior& interior)
 				// And remove the merged group
 				planeGroups.erase(planeGroups.begin() + secondGroup);
 			}
-			assert(planeGroups.size() <= 8, "Error, too many plane groupings!");
+			assert(planeGroups.size() <= 8 && "Error, too many plane groupings!");
 
 
 			// Assign a mask to each of the plane groupings
@@ -1173,7 +1173,7 @@ void buildHullPolyLists(Interior& interior)
 						}
 					}
 				}
-				assert(assigned, "Error, missed a plane somewhere in the hull poly list!");
+				assert(assigned && "Error, missed a plane somewhere in the hull poly list!");
 			}
 		}
 
@@ -1191,7 +1191,7 @@ void buildHullPolyLists(Interior& interior)
 						}
 					}
 				}
-				assert(planeMasks[j] != 0, "Error, missing mask for plane!");
+				assert(planeMasks[j] != 0 && "Error, missing mask for plane!");
 			}
 		}
 
@@ -1208,7 +1208,7 @@ void buildHullPolyLists(Interior& interior)
 						}
 					}
 				}
-				assert(pointMasks[j] != 0, "Error, point must exist in at least one surface!");
+				assert(pointMasks[j] != 0 && "Error, point must exist in at least one surface!");
 			}
 		}
 
@@ -1263,7 +1263,7 @@ void buildHullPolyLists(Interior& interior)
 						break;
 					}
 				}
-				assert(found, "Error, missing planeindex!");
+				assert(found && "Error, missing planeindex!");
 
 				for (k = 0; k < tempSurfaces[j].numPoints; k++) {
 					interior.polyListStringCharacter.push_back((tempSurfaces[j].pointIndices[k] >> 8) & 0xFF);
@@ -1548,7 +1548,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 	//for (auto& poly : polyList)
 	//{
 	//	if (poly.surfaceIndex == -1) {
-	//		throw new std::exception("Polygon not used!");
+	//		throw new std::runtime_error("Polygon not used!");
 	//	}
 	//}
 
@@ -1568,7 +1568,7 @@ void DIFBuilder::build(DIF& dif, bool flipNormals)
 
 	for (auto& poly : polyList) {
 		if (poly->surfaceIndex == -1)
-			throw new std::exception("Unused poly");
+			throw new std::runtime_error("Unused poly");
 	}
 
 	//orderedpolys->clear();
@@ -2257,7 +2257,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 					 [ 0 0 0 r ]   ( z )   ( uv2' )
 								   ( d )
 				*/
-				throw std::exception("Invalid texgen for one of the faces"); // No solution
+				throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 			}
 			
 			if (closeEnough(zvec[3], 0.0, 1e-4)) {
@@ -2268,7 +2268,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 						 [ 0 0 0 0 ]   ( z )   ( uv2' )
 									   ( d )
 					*/
-					throw std::exception("Invalid texgen for one of the faces"); // No solution
+					throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 
 				// otherwise the entire third row is 0 and is already "solved"
 			} 
@@ -2304,7 +2304,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 					 [ 0 0 0 r ]   ( z )   ( uv2' )
 								   ( d )
 				*/
-				throw std::exception("Invalid texgen for one of the faces"); // No solution
+				throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 			}
 
 			if (closeEnough(xvec[3], 0.0, 1e-4)) {
@@ -2315,7 +2315,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 						 [ 0 0 0 0 ]   ( z )   ( uv2' )
 									   ( d )
 					*/
-					throw std::exception("Invalid texgen for one of the faces"); // No solution
+					throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 
 				// otherwise the entire third row is 0 and is already "solved"
 			}
@@ -2351,7 +2351,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 					 [ 0 0 1 r ]   ( z )   ( uv2' )
 								   ( d )
 				*/
-				throw std::exception("Invalid texgen for one of the faces"); // No solution
+				throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 			}
 
 			if (closeEnough(yvec[3], 0.0, 1e-4)) {
@@ -2362,7 +2362,7 @@ glm::vec4 solveMatrix(Mat3x5 pointMatrix, bool print = false) {
 						 [ 0 0 1 r ]   ( z )   ( uv2' )
 									   ( d )
 					*/
-					throw std::exception("Invalid texgen for one of the faces"); // No solution
+					throw std::runtime_error("Invalid texgen for one of the faces"); // No solution
 
 				// otherwise the entire second row is 0 and is already "solved"
 			}

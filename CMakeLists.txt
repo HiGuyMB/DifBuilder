@@ -6,7 +6,7 @@ add_subdirectory(3rdparty/Dif)
 
 # Allow C++11 features
 if (UNIX)
-list (APPEND CMAKE_CXX_FLAGS "-std=c++11 ${CMAKE_CXX_FLAGS}")
+list (APPEND CMAKE_CXX_FLAGS "-std=c++17 ${CMAKE_CXX_FLAGS}")
 else()
 list (APPEND CMAKE_CXX_FLAGS "/MP /FS ${CMAKE_CXX_FLAGS}")
 endif()
@@ -50,7 +50,9 @@ SET (DIFBUILDER_SRC
 
 # Create the library
 add_library(DifBuilder STATIC ${DIFBUILDER_SRC})
-set_target_properties(Dif PROPERTIES COMPILE_FLAGS "/FS")
+if (MSVC)
+	set_target_properties(Dif PROPERTIES COMPILE_FLAGS "/FS")
+endif ()
 include_directories(include)
 include_directories(3rdparty)
 include_directories(3rdparty/Dif)
